@@ -5,8 +5,19 @@
   "license": "MIT",
   "keywords": [
     "homebridge-plugin",
+    "homebridge",
+    "homekit",
     "yeelight",
-    "ceiling"
+    "xiaomi",
+    "smart-home",
+    "home-automation",
+    "smart-lighting",
+    "bulb",
+    "ceiling-light",
+    "light-strip",
+    "siri",
+    "ssdp",
+    "lan-control"
   ],
   "repository": {
     "type": "git",
