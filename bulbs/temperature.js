@@ -48,49 +48,45 @@ const Temperature = (Device) =>
       this._temperature = Math.floor(10 ** 6 / Number(kelvin));
     }
 
-    async setTemperature(mired) {
+    // The controller stays an empty object when Homebridge is too old to
+    // provide one, and calling through it blindly used to throw.
+    get adaptiveLighting() {
+      return (
+        typeof this.controller.isAdaptiveLightingActive === 'function' &&
+        this.controller.isAdaptiveLightingActive()
+      );
+    }
+
+    setTemperature(mired) {
       // If we are already in color temperature mode (2) and the current
       // temperature matches the new temperature there is no need to send
       // another command.
-      if (this.temperature === mired && this.colorMode === 2) return;
-
-      // If we receive a direct command from the user to go to a certain color
-      // temperature, turn on the device and go to that temperature.
-      if (!this.controller.isAdaptiveLightingActive()) {
-        await this.setPower(true);
+      if (this.temperature === mired && this.colorMode === 2) {
+        return Promise.resolve();
       }
 
-      // If the device is powered off there is no point in sending the command
-      // as it will have no effect. Let's just update our internal state so
-      // we can send the command when the device is powered on.
-      if (!this.power) {
-        this._temperature = mired;
-        return;
-      }
-
-      const { temperature: transition = 400 } = this.config.transitions || {};
-      const kelvin = 10 ** 6 / mired;
-      const req = {
-        method: 'set_ct_abx',
-        params: [kelvin, 'smooth', transition],
-      };
-
-      return this.sendCmd(req).then(() => {
-        this._temperature = mired;
-        // After set_ct_abx runs the bulb will be in temperature color mode (2).
-        this.colorMode = 2;
-
-        // When adaptive lightning is enabled homebridge already takes care
-        // of updating the color in HomeKit to match the current color temperature.
-        //
-        // However when we set the color temperature directly we have to do it
-        // ourselves.
-        if (!this.controller.isAdaptiveLightingActive()) {
-          const { hue, sat } = colorFromTemperature(mired);
-          super.updateStateFromProp('hue', hue);
-          super.updateStateFromProp('sat', sat);
+      // Adaptive lighting drifts the temperature on its own schedule and must
+      // never switch the lamp on to do it.
+      if (this.adaptiveLighting) {
+        if (!this.power) {
+          // Remember it so the value is applied the next time it powers on.
+          this._temperature = mired;
+          return Promise.resolve();
         }
-      });
+        return this.applyState({ ct: mired });
+      }
+
+      // A direct request from the user turns the lamp on and takes it there.
+      return this.applyState({ power: true, ct: mired });
+    }
+
+    onTemperatureApplied(mired) {
+      // With adaptive lighting on, Homebridge already updates the colour in
+      // HomeKit to match; when we set the temperature ourselves we have to.
+      if (this.adaptiveLighting) return;
+      const { hue, sat } = colorFromTemperature(mired);
+      super.updateStateFromProp('hue', hue);
+      super.updateStateFromProp('sat', sat);
     }
 
     updateStateFromProp(prop, value) {
@@ -102,7 +98,7 @@ const Temperature = (Device) =>
             .updateValue(this.temperature);
           break;
         case 'color_mode':
-          this.colorMode = value;
+          this.colorMode = Number(value);
           break;
         default:
           super.updateStateFromProp(prop, value);
@@ -122,7 +118,7 @@ const Temperature = (Device) =>
         .getCharacteristic(global.Characteristic.On)
         .on('change', ({ newValue, oldValue, reason }) => {
           if (reason !== 'write') return;
-          if (!this.controller.isAdaptiveLightingActive()) return;
+          if (!this.adaptiveLighting) return;
           if (!oldValue && newValue) {
             this.setTemperature(this._temperature--);
           }

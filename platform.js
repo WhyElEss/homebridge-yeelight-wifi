@@ -10,6 +10,11 @@ const BacklightBrightness = require('./bulbs/backlight/brightness');
 const BacklightColor = require('./bulbs/backlight/color');
 const { getDeviceId, getName, blacklist, sleep, pipe } = require('./utils');
 
+// Lamps re-announce themselves unprompted, so the active search only has to
+// cover the gap right after a restart instead of running forever.
+const SEARCH_INTERVAL = 15000;
+const SEARCH_ROUNDS = 40;
+
 class YeePlatform {
   constructor(log, config, api) {
     if (!api) return;
@@ -26,6 +31,7 @@ class YeePlatform {
     this.config = config;
     this.sock = dgram.createSocket('udp4');
     this.devices = {};
+    this.bulbs = {};
 
     this.sock.bind(this.port, () => {
       this.sock.setBroadcast(true);
@@ -41,15 +47,31 @@ class YeePlatform {
     this.api.on('didFinishLaunching', async () => {
       this.sock.on('message', this.handleMessage.bind(this));
       log(`Searching for known devices...`);
+
+      let round = 0;
       do {
         this.search();
+        round += 1;
         // eslint-disable-next-line no-await-in-loop
-        await sleep(15000);
+        await sleep(SEARCH_INTERVAL);
       } while (
+        round < SEARCH_ROUNDS &&
         Object.values(this.devices).some((accessory) => !accessory.initialized)
       );
 
-      log(`All known devices found. Stopping proactive search.`);
+      const missing = Object.values(this.devices).filter(
+        (accessory) => !accessory.initialized
+      );
+
+      if (missing.length) {
+        log.warn(
+          `Giving up the proactive search; still waiting on ${missing
+            .map((accessory) => accessory.displayName)
+            .join(', ')}. They will be picked up from their own announcements.`
+        );
+      } else {
+        log(`All known devices found. Stopping proactive search.`);
+      }
     });
   }
 
@@ -60,7 +82,7 @@ class YeePlatform {
   }
 
   search() {
-    this.log('Sending search request...');
+    this.log.debug('Sending search request...');
     this.sock.send(
       this.searchMessage,
       0,
@@ -71,17 +93,41 @@ class YeePlatform {
   }
 
   handleMessage(message) {
-    const headers = {};
-    const [method, ...kvs] = message.toString().split(global.EOL);
+    let headers;
+    let endpoint;
 
-    if (method.startsWith('M-SEARCH')) return;
+    try {
+      headers = {};
+      const [method, ...kvs] = message.toString().split(global.EOL);
 
-    kvs.forEach((kv) => {
-      const [k, v] = kv.split(': ');
-      headers[k] = v;
-    });
-    const endpoint = headers.Location.split('//')[1];
-    this.log(`Received advertisement from ${getDeviceId(headers.id)}.`);
+      if (method.startsWith('M-SEARCH')) return;
+
+      kvs.forEach((kv) => {
+        const separator = kv.indexOf(': ');
+        if (separator === -1) return;
+        headers[kv.slice(0, separator)] = kv.slice(separator + 2);
+      });
+
+      // Anything without an id or a location is not a lamp talking to us.
+      if (!headers.id || !headers.Location) return;
+      endpoint = headers.Location.split('//')[1];
+      if (!endpoint) return;
+    } catch (err) {
+      this.log.debug(`Ignoring malformed advertisement: ${err.message}`);
+      return;
+    }
+
+    this.log.debug(`Received advertisement from ${getDeviceId(headers.id)}.`);
+
+    const bulb = this.bulbs[headers.id];
+    if (bulb) {
+      // Announcements are how we hear about a new DHCP lease, and they carry
+      // the full state, so following them costs no commands.
+      bulb.relocate(endpoint);
+      bulb.sync(headers);
+      return;
+    }
+
     this.buildDevice(endpoint, headers);
   }
 
@@ -95,6 +141,7 @@ class YeePlatform {
       this.log.debug(`Device ${name} is blacklisted, ignoring...`);
       try {
         delete this.devices[id];
+        delete this.bulbs[id];
         this.api.unregisterPlatformAccessories(
           'homebridge-yeelight',
           'yeelight',
@@ -126,7 +173,7 @@ class YeePlatform {
     if (accessory?.initialized) return;
 
     const mixins = [];
-    const limits = devices[model] || devices['default'];
+    const limits = this.limitsFor(model);
 
     if (!hidden.includes('active_mode')) {
       mixins.push(MoonlightMode);
@@ -163,7 +210,22 @@ class YeePlatform {
     }
 
     const Bulb = class extends pipe(...mixins)(YeeBulb) {};
-    return new Bulb({ id, model, endpoint, accessory, limits, ...props }, this);
+    const bulb = new Bulb(
+      { id, model, endpoint, accessory, limits, ...props },
+      this
+    );
+    this.bulbs[id] = bulb;
+    return bulb;
+  }
+
+  // Models are numbered variants of a family (bslamp1, bslamp2, bslamp3) but
+  // the table is keyed by family, so an exact lookup never matched and every
+  // bedside lamp silently fell back to the default range.
+  limitsFor(model) {
+    if (!model) return devices['default'];
+    return (
+      devices[model] || devices[model.replace(/\d+$/, '')] || devices['default']
+    );
   }
 }
 

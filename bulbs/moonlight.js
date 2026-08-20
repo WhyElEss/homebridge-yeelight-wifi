@@ -5,7 +5,11 @@ const MoonlightMode = (Device) =>
   class extends Device {
     constructor(props, platform) {
       super(props, platform);
-      this.initMoonlight();
+      this.initMoonlight().catch((err) => {
+        this.log.debug(
+          `${this.tag}: moonlight probe failed: ${err.message || err}.`
+        );
+      });
     }
 
     async initMoonlight() {
@@ -51,14 +55,21 @@ const MoonlightMode = (Device) =>
         params: ['on', 'smooth', transition, state ? 5 : 1],
       });
       this.activeMode = state ? MOONLIGHT_MODE : DAYLIGHT_MODE;
+      // The command powers the lamp on as a side effect.
+      this.power = 'on';
     }
 
     updateStateFromProp(prop, value) {
       if (prop === 'active_mode') {
-        this.activeMode = value;
-        this.moonlightModeService
-          .getCharacteristic(global.Characteristic.On)
-          .updateValue(this.activeMode === MOONLIGHT_MODE);
+        // Kept numeric: the brightness and temperature mixins compare it
+        // against 1, and a string never matched.
+        this.activeMode = Number(value);
+        // Advertisements can arrive before the probe has built the service.
+        if (this.moonlightModeService) {
+          this.moonlightModeService
+            .getCharacteristic(global.Characteristic.On)
+            .updateValue(this.activeMode === MOONLIGHT_MODE);
+        }
         return;
       }
 

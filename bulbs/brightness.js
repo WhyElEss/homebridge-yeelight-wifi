@@ -1,4 +1,4 @@
-const Brightness = Device =>
+const Brightness = (Device) =>
   class extends Device {
     constructor(props, platform) {
       super(props, platform);
@@ -27,16 +27,10 @@ const Brightness = Device =>
       this._bright = Number(bright);
     }
 
-    async setBrightness(brightness) {
-      const { brightness: transition = 400 } = this.config.transitions || {};
-      await this.setPower(true); // Commands can be dropped if bulb is not turned on first
-      const req = {
-        method: 'set_bright',
-        params: [Math.max(brightness, 1), 'smooth', transition],
-      };
-      return this.sendCmd(req).then(() => {
-        this._bright = brightness;
-      });
+    setBrightness(brightness) {
+      // The lamp drops brightness while it is off, so power is requested in the
+      // same flush rather than as a separate command ahead of it.
+      return this.applyState({ power: true, bright: brightness });
     }
 
     updateStateFromProp(prop, value) {

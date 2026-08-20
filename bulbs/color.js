@@ -1,10 +1,5 @@
-const { isInteger } = Number;
-
-const Color = Device => {
-  let hue;
-  let sat;
-
-  return class extends Device {
+const Color = (Device) =>
+  class extends Device {
     constructor(props, platform) {
       super(props, platform);
       this.hue = props.hue;
@@ -78,25 +73,19 @@ const Color = Device => {
       super.updateStateFromProp(prop, value);
     }
 
-    async setColor(hv, sv) {
-      hue = isInteger(hue) ? hue : hv;
-      sat = isInteger(sat) ? sat : sv;
-      if (!isInteger(hue) || !isInteger(sat)) return Promise.resolve();
-
-      const { color: transition = 400 } = this.config.transitions || {};
-      await this.setPower(true); // Commands can be dropped if bulb is not turned on first
-      const req = {
-        method: 'set_hsv',
-        params: [hue, sat, 'smooth', transition],
-      };
-      return this.sendCmd(req).then(() => {
-        this._hue = hue;
-        this._sat = sat;
-        hue = null;
-        sat = null;
-      });
+    // HomeKit writes Hue and Saturation as two calls milliseconds apart. They
+    // are merged by the flush window, which is what the old module-level hue
+    // and sat pair was reaching for -- it leaked between calls and stuck for
+    // good whenever a send failed.
+    setColor(hv, sv) {
+      const patch = { power: true };
+      if (Number.isFinite(hv)) patch.hue = hv;
+      if (Number.isFinite(sv)) patch.sat = sv;
+      if (patch.hue === undefined && patch.sat === undefined) {
+        return Promise.resolve();
+      }
+      return this.applyState(patch);
     }
   };
-};
 
 module.exports = Color;

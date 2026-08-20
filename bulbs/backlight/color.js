@@ -1,14 +1,12 @@
-const { isInteger } = Number;
-
-const BacklightColor = (Device) => {
-  let hue;
-  let sat;
-
-  return class extends Device {
+const BacklightColor = (Device) =>
+  class extends Device {
     constructor(props, platform) {
       super(props, platform);
       this.backlightHue = props['bg_hue'];
       this.backlightSat = props['bg_sat'];
+      // Hue and Saturation arrive as two separate writes; the half that lands
+      // first is parked here until its partner shows up.
+      this.pendingBacklightColor = {};
 
       const { Hue, Saturation } = global.Characteristic;
 
@@ -79,24 +77,26 @@ const BacklightColor = (Device) => {
     }
 
     async setBacklightColor(hv, sv) {
-      hue = isInteger(hue) ? hue : hv;
-      sat = isInteger(sat) ? sat : sv;
-      if (!isInteger(hue) || !isInteger(sat)) return;
+      const pending = this.pendingBacklightColor;
+      if (Number.isFinite(hv)) pending.hue = hv;
+      if (Number.isFinite(sv)) pending.sat = sv;
+
+      const hue = pending.hue === undefined ? this.backlightHue : pending.hue;
+      const sat = pending.sat === undefined ? this.backlightSat : pending.sat;
+      if (!Number.isFinite(hue) || !Number.isFinite(sat)) return;
 
       const { color: transition = 400 } = this.config.transitions || {};
       await this.setBacklightPower(true);
       const req = {
         method: 'bg_set_hsv',
-        params: [hue, sat, 'smooth', transition],
+        params: [Math.round(hue), Math.round(sat), 'smooth', transition],
       };
       return this.sendCmd(req).then(() => {
         this._backlightHue = hue;
         this._backlightSat = sat;
-        hue = null;
-        sat = null;
+        this.pendingBacklightColor = {};
       });
     }
   };
-};
 
 module.exports = BacklightColor;
