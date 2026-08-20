@@ -142,6 +142,11 @@ Full, with defaults shown:
       "multicast": {
         "interface": "0.0.0.0"
       },
+      "alert": {
+        "enabled": false,
+        "hue": 0,
+        "saturation": 100
+      },
       "defaultValue": {
         "aed78s": {
           "name": "Kitchen",
@@ -174,10 +179,37 @@ Keyed by the last six characters of the device id, which appear in the log as `R
 
 - `name` — the name shown in HomeKit. Defaults to `<model>-<id>`, e.g. `bslamp3-78cb4e`.
 - `blacklist` — an array of capabilities to hide from HomeKit (`set_hsv`, `set_ct_abx`, `set_bright`, `active_mode`, …), or `true` to hide the device entirely.
+- `alert` — the same shape as the platform-level [`alert`](#alert) block, overriding it for this lamp. `false` switches the alert switch off for this lamp alone, `true` switches it on with the platform's colour.
+
+### `alert`
+
+Off by default. When enabled, every colour-capable lamp gets a second accessory named `<name> Alert` — a plain switch. See [Alert switch](#alert-switch-flash-and-restore-without-losing-adaptive-lighting).
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `enabled` | `false` | Whether to expose the alert switch at all. |
+| `hue` | `0` | Alert colour, 0–360. The default is red. |
+| `saturation` | `100` | Alert saturation, 0–100. |
+| `brightness` | unset | Alert brightness, 1–100. Left unset the lamp keeps the brightness it already had, which is also one command less on the wire. |
 
 ### `multicast`
 
 Set `interface` to a specific address when the host has several and discovery binds to the wrong one.
+
+## Alert switch: flash and restore without losing Adaptive Lighting
+
+With `alert.enabled`, each colour-capable lamp gains a `<name> Alert` switch, for automations like _"turn the lamp red while the front door is open, then put it back to whatever it was doing"_.
+
+- Switching it **on** snapshots the lamp's power, colour, colour temperature and brightness, then takes it to the alert colour. A lamp that was off is lit by a single `set_scene`.
+- Switching it **off** puts the snapshot back: the colour or the colour temperature it was on, and off again if that is how it started. The colour is restored before the power, so a lamp that was off does not come back red the next time anything switches it on.
+
+Two ordinary single-action automations in the Home app drive it — _door opens_ → switch on, _door closes_ → switch off. Neither has anything to sequence or wait on, so any home hub can run them, with no phone present and no Shortcuts involved.
+
+**On Adaptive Lighting.** This is the reason the alert lives inside the plugin rather than in some separate service that would drive the lamp over HomeKit. HAP-NodeJS switches an active Adaptive Lighting transition off on any characteristic change whose reason is a write — so an outside process setting Hue or Saturation would silently end Adaptive Lighting for that lamp, and only the Home app can arm it again. Everything here goes to the lamp over its own LAN protocol and is reported back to HomeKit with `updateValue`, which is not a write. The transition stays armed across the whole flash-and-restore cycle; there is a test that asserts no characteristic is ever written.
+
+While a lamp is flashing, Adaptive Lighting's background nudges are held back, so the alert colour is not washed out within the minute — but their values are still recorded, so the restore puts the lamp on the curve where it stands at that moment rather than where it was when the alert began.
+
+Cost on the wire: one command to flash, one to restore (two if the lamp was off, or if `brightness` is configured).
 
 ## Tests
 
@@ -186,6 +218,8 @@ npm test
 ```
 
 Runs the real bulb classes against a fake HAP and a fake lamp, asserting on what actually reaches the socket: that a scene is one `set_scene`, that `Hue` and `Saturation` merge, that an unanswered command costs one retry rather than six writes, that the quota gate holds, that a reply split across two TCP reads still parses, and that a lamp hanging up mid-command is recovered from.
+
+The alert has its own group: that flashing a lit lamp is a single `set_hsv`, that the restore reproduces the snapshot exactly and sends the power off in its own flush after the colour, that an Adaptive Lighting nudge arriving mid-alert never reaches the lamp but is still remembered for the restore, and that no characteristic is ever written — the one thing that would take Adaptive Lighting down.
 
 It earns its keep — it caught a socket being closed after it had already been replaced, which failed the command in flight on its successor and produced exactly the duplicate write this fork set out to remove.
 

@@ -360,7 +360,9 @@ class YeeBulb {
 
         if (attempt === this.retries) {
           this.log.error(
-            `${this.tag}: cmd ${cmd.id} failed after ${attempt + 1} attempt(s): ${code}.`
+            `${this.tag}: cmd ${cmd.id} failed after ${
+              attempt + 1
+            } attempt(s): ${code}.`
           );
           throw err;
         }
@@ -536,7 +538,9 @@ class YeeBulb {
         });
       }
     } else if (hasTemperature) {
-      const kelvin = 10 ** 6 / desired.ct;
+      // Rounded like the set_scene path: set_ct_abx takes a whole Kelvin
+      // value, and 1e6/300 is 3333.3333333333335 unrounded.
+      const kelvin = Math.round(10 ** 6 / desired.ct);
       steps.push({
         cmd: {
           method: 'set_ct_abx',

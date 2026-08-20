@@ -8,6 +8,18 @@ class FakeCharacteristic {
     this.id = id;
     this.handlers = {};
     this.value = null;
+    // Anything that would count as a HomeKit write, which is what takes
+    // Adaptive Lighting down. The plugin must never do this itself.
+    this.hapWrites = [];
+  }
+  setValue(v) {
+    this.hapWrites.push(v);
+    this.value = v;
+    return this;
+  }
+  removeAllListeners(ev) {
+    delete this.handlers[ev];
+    return this;
   }
   on(ev, fn) {
     this.handlers[ev] = fn;
@@ -20,9 +32,13 @@ class FakeCharacteristic {
   setProps() {
     return this;
   }
-  write(value) {
+  write(value, context) {
     return new Promise((resolve, reject) => {
-      this.handlers.set(value, (err) => (err ? reject(err) : resolve()));
+      this.handlers.set(
+        value,
+        (err) => (err ? reject(err) : resolve()),
+        context
+      );
     });
   }
   read() {
@@ -177,16 +193,20 @@ const Brightness = require('../bulbs/brightness');
 const MoonlightMode = require('../bulbs/moonlight');
 const Color = require('../bulbs/color');
 const Temperature = require('../bulbs/temperature');
+const Alert = require('../bulbs/alert');
 const { pipe } = require('../utils');
 
 async function makeBulb(lamp, config = {}, props = {}) {
   const accessory = new FakeAccessory('Lamp');
   accessory.context.did = '0xtest';
+  // Alert last, mirroring platform.js: its setTemperature override has to sit
+  // outside the temperature mixin's.
   const Bulb = class extends pipe(
     MoonlightMode,
     Brightness,
     Color,
-    Temperature
+    Temperature,
+    Alert
   )(YeeBulb) {};
   const bulb = new Bulb(
     {

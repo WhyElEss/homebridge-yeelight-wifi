@@ -5,9 +5,11 @@ const Brightness = require('./bulbs/brightness');
 const MoonlightMode = require('./bulbs/moonlight');
 const Color = require('./bulbs/color');
 const Temperature = require('./bulbs/temperature');
+const Alert = require('./bulbs/alert');
 const Backlight = require('./bulbs/backlight/bulb');
 const BacklightBrightness = require('./bulbs/backlight/brightness');
 const BacklightColor = require('./bulbs/backlight/color');
+const alertAccessory = require('./alert-accessory');
 const { getDeviceId, getName, blacklist, sleep, pipe } = require('./utils');
 
 // Lamps re-announce themselves unprompted, so the active search only has to
@@ -32,6 +34,9 @@ class YeePlatform {
     this.sock = dgram.createSocket('udp4');
     this.devices = {};
     this.bulbs = {};
+    // Alert switches live on their own accessories, keyed by the same device
+    // id as the lamp they belong to.
+    this.alerts = {};
 
     this.sock.bind(this.port, () => {
       this.sock.setBroadcast(true);
@@ -78,6 +83,12 @@ class YeePlatform {
   configureAccessory(accessory) {
     this.log(`Loaded accessory ${accessory.displayName}.`);
     accessory.initialized = false;
+    // Both accessories of a lamp carry the same did, so the role decides which
+    // shelf they belong on.
+    if (accessory.context.role === 'alert') {
+      this.alerts[accessory.context.did] = accessory;
+      return;
+    }
     this.devices[accessory.context.did] = accessory;
   }
 
@@ -139,6 +150,7 @@ class YeePlatform {
 
     if (hidden === true) {
       this.log.debug(`Device ${name} is blacklisted, ignoring...`);
+      alertAccessory.remove(this, id);
       try {
         delete this.devices[id];
         delete this.bulbs[id];
@@ -209,13 +221,63 @@ class YeePlatform {
       mixins.push(BacklightColor);
     }
 
+    const alert = this.alertFor(model, deviceId, features, name);
+
+    // Applied last so its setTemperature override wraps the temperature
+    // mixin's, which is what lets it swallow background Adaptive Lighting
+    // nudges while the lamp is flashing.
+    if (alert.enabled) {
+      this.log(`Device ${name} gets an alert switch`);
+      mixins.push(Alert);
+    }
+
     const Bulb = class extends pipe(...mixins)(YeeBulb) {};
     const bulb = new Bulb(
-      { id, model, endpoint, accessory, limits, ...props },
+      { id, model, endpoint, accessory, limits, alert, ...props },
       this
     );
     this.bulbs[id] = bulb;
+    alertAccessory.configure(this, bulb, { id, name });
     return bulb;
+  }
+
+  // Alert settings come from the platform block and can be overridden per
+  // lamp under defaultValue, keyed either by the six-character device id or by
+  // the full <model>-<id> name. `false` there switches a single lamp off.
+  clamp(value, min, max) {
+    if (!Number.isFinite(Number(value))) return undefined;
+    return Math.min(Math.max(Number(value), min), max);
+  }
+
+  alertFor(model, deviceId, features, name) {
+    const perDevice = [`${model}-${deviceId}`, deviceId]
+      .map((key) => this.config?.defaultValue?.[key]?.alert)
+      .find((value) => value !== undefined);
+
+    if (perDevice === false) return { enabled: false };
+
+    const alert = Object.assign(
+      { enabled: false },
+      this.config?.alert,
+      perDevice === true ? { enabled: true } : perDevice
+    );
+
+    if (!alert.enabled) return { enabled: false };
+
+    // An alert is a colour, so a lamp that cannot take one has nothing to show.
+    if (!features.includes('set_hsv')) {
+      this.log.warn(
+        `Device ${name} has no colour support, so it gets no alert switch.`
+      );
+      return { enabled: false };
+    }
+
+    return {
+      enabled: true,
+      hue: this.clamp(alert.hue, 0, 360) ?? 0,
+      saturation: this.clamp(alert.saturation, 0, 100) ?? 100,
+      brightness: this.clamp(alert.brightness, 1, 100),
+    };
   }
 
   // Models are numbered variants of a family (bslamp1, bslamp2, bslamp3) but

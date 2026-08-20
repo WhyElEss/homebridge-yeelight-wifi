@@ -14,7 +14,18 @@ const Temperature = (Device) =>
         this.service.getCharacteristic(ColorTemperature) ||
         this.service.addOptionalCharacteristic(ColorTemperature)
       )
-        .on('set', async (value, callback) => {
+        // AdaptiveLightingController drives its periodic nudges through this
+        // same SET handler, passing `{ controller, omitEventUpdate }` as the
+        // context. A person dragging the temperature slider arrives without
+        // it, which is the only way to tell a background nudge from a
+        // deliberate change - see the alert mixin, which suppresses the
+        // former while a lamp is flashing.
+        .on('set', async (value, callback, context) => {
+          const fromAdaptiveLighting =
+            typeof context === 'object' &&
+            context !== null &&
+            'controller' in context;
+
           // In moonlight mode (1) do not attempt to change the temperature
           // since it would switch the device to daylight mode (0)
           if (this.activeMode === 1) {
@@ -27,7 +38,7 @@ const Temperature = (Device) =>
           }
 
           try {
-            await this.setTemperature(value);
+            await this.setTemperature(value, fromAdaptiveLighting);
             callback(null);
           } catch (err) {
             callback(err);
@@ -57,7 +68,11 @@ const Temperature = (Device) =>
       );
     }
 
-    setTemperature(mired) {
+    // `fromAdaptiveLighting` is unused here - whether the lamp may be woken
+    // depends on AL being armed, not on which write this is - but it is part
+    // of the signature so the alert mixin can intercept background nudges.
+    // eslint-disable-next-line no-unused-vars
+    setTemperature(mired, fromAdaptiveLighting = false) {
       // If we are already in color temperature mode (2) and the current
       // temperature matches the new temperature there is no need to send
       // another command.

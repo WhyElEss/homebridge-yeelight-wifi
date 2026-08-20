@@ -88,7 +88,9 @@ async function run() {
     const m = lamp.methods();
     const scenes = m.filter((x) => x === 'set_scene');
     console.log(
-      `     writes=${JSON.stringify(m)} connections=${lamp.connections} elapsed=${elapsed}ms`
+      `     writes=${JSON.stringify(m)} connections=${
+        lamp.connections
+      } elapsed=${elapsed}ms`
     );
     check(
       'scene written at most twice (1 try + 1 retry)',
@@ -330,6 +332,196 @@ async function run() {
     check('cost exactly one extra write', writes === 2, `${writes}`);
     check('recovered fast, no 6s ladder', elapsed < 1500, `${elapsed}ms`);
     bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 13
+  console.log('\n13. Alert on a lamp that is already lit');
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { bulb } = await makeBulb(
+      lamp,
+      {},
+      { power: 'on', alert: { enabled: true, hue: 0, saturation: 100 } }
+    );
+    bulb.alertService = new global.Service.Switch('Lamp Alert');
+    await bulb.setAlert(true);
+    await sleep(150);
+    const m = lamp.methods();
+    check('one command', m.length === 1, `${m.length}: ${m}`);
+    check('it is set_hsv, no extra set_power', m[0] === 'set_hsv', `${m}`);
+    check(
+      'carries the alert colour',
+      JSON.stringify(lamp.received[0].params.slice(0, 2)) === '[0,100]',
+      JSON.stringify(lamp.received[0].params)
+    );
+    check(
+      'snapshot taken from the pre-alert state',
+      bulb.alertSnapshot.hue === 10 && bulb.alertSnapshot.sat === 20,
+      JSON.stringify(bulb.alertSnapshot)
+    );
+    check(
+      'switch reflects the alert',
+      bulb.alertService.getCharacteristic('On').value === true,
+      `${bulb.alertService.getCharacteristic('On').value}`
+    );
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 14
+  console.log('\n14. Restore puts the colour back in one command');
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { bulb } = await makeBulb(
+      lamp,
+      {},
+      { power: 'on', alert: { enabled: true, hue: 0, saturation: 100 } }
+    );
+    await bulb.setAlert(true);
+    await sleep(150);
+    lamp.reset();
+    await bulb.setAlert(false);
+    await sleep(150);
+    const m = lamp.methods();
+    check('one command', m.length === 1, `${m.length}: ${m}`);
+    check('back through set_hsv', m[0] === 'set_hsv', `${m}`);
+    check(
+      'exactly the snapshotted colour',
+      JSON.stringify(lamp.received[0].params.slice(0, 2)) === '[10,20]',
+      JSON.stringify(lamp.received[0].params)
+    );
+    check(
+      'no brightness command, since the alert never moved it',
+      !m.includes('set_bright'),
+      `${m}`
+    );
+    check('alert cleared', bulb.alertActive === false, `${bulb.alertActive}`);
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 15
+  console.log('\n15. Alert on a lamp that was off, then restored to off');
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { bulb } = await makeBulb(
+      lamp,
+      {},
+      { power: 'off', alert: { enabled: true, hue: 0, saturation: 100 } }
+    );
+    await bulb.setAlert(true);
+    await sleep(150);
+    check(
+      'lit by a single set_scene',
+      lamp.methods().length === 1 && lamp.methods()[0] === 'set_scene',
+      `${lamp.methods()}`
+    );
+    lamp.reset();
+    await bulb.setAlert(false);
+    await sleep(200);
+    const m = lamp.methods();
+    check(
+      'two commands: colour, then off',
+      m.length === 2,
+      `${m.length}: ${m}`
+    );
+    check('colour goes first', m[0] === 'set_hsv', `${m}`);
+    check(
+      'off goes last, in its own flush',
+      m[1] === 'set_power' && lamp.received[1].params[0] === 'off',
+      JSON.stringify(lamp.received.map((r) => [r.method, r.params]))
+    );
+    check('lamp is off again', bulb.power === false, `${bulb.power}`);
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 16
+  console.log('\n16. Adaptive Lighting nudges are swallowed while flashing');
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(
+      lamp,
+      {},
+      { power: 'on', alert: { enabled: true, hue: 0, saturation: 100 } }
+    );
+    // The real controller reports this while a transition is running.
+    bulb.controller = { isAdaptiveLightingActive: () => true };
+    bulb.colorMode = 2;
+    await bulb.setAlert(true);
+    await sleep(150);
+    lamp.reset();
+
+    // How HAP-NodeJS delivers a nudge: the SET handler, with the controller
+    // in the context.
+    await service
+      .getCharacteristic('ColorTemperature')
+      .write(300, { controller: {}, omitEventUpdate: true });
+    await sleep(150);
+    check(
+      'nudge never reached the lamp',
+      lamp.methods().length === 0,
+      `${lamp.methods()}`
+    );
+    check(
+      'but its value was remembered',
+      bulb.temperature === 300,
+      `${bulb.temperature}`
+    );
+
+    await bulb.setAlert(false);
+    await sleep(150);
+    const m = lamp.methods();
+    check('restored as a temperature', m[0] === 'set_ct_abx', `${m}`);
+    check(
+      'lands on the current curve point, not the stale one',
+      lamp.received[0].params[0] === Math.round(10 ** 6 / 300),
+      JSON.stringify(lamp.received[0].params)
+    );
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 17
+  console.log('\n17. The alert never performs a HomeKit write');
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(
+      lamp,
+      {},
+      {
+        power: 'on',
+        alert: { enabled: true, hue: 0, saturation: 100, brightness: 100 },
+      }
+    );
+    bulb.controller = { isAdaptiveLightingActive: () => true };
+    await bulb.setAlert(true);
+    await sleep(150);
+    await bulb.setAlert(false);
+    await sleep(200);
+    const written = [
+      'Hue',
+      'Saturation',
+      'ColorTemperature',
+      'Brightness',
+      'On',
+    ]
+      .map((c) => [c, service.getCharacteristic(c).hapWrites])
+      .filter(([, writes]) => writes.length);
+    // A write is what HAP-NodeJS reads as "the user changed this by hand", and
+    // it disables the running Adaptive Lighting transition permanently.
+    check(
+      'no setValue on any characteristic',
+      written.length === 0,
+      JSON.stringify(written)
+    );
+    check(
+      'HomeKit still told about the colour, via updateValue',
+      service.getCharacteristic('Hue').value === 10,
+      `${service.getCharacteristic('Hue').value}`
+    );
     await lamp.close();
   }
 
