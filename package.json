@@ -1,7 +1,7 @@
 {
   "name": "homebridge-yeelight-wifi",
   "version": "3.1.0",
-  "description": "Homebridge plugin for YeeLight bulbs & lamps.",
+  "description": "Homebridge plugin for YeeLight bulbs & lamps, paced to stay inside the firmware's LAN command quota.",
   "license": "MIT",
   "keywords": [
     "homebridge-plugin",
@@ -10,13 +10,13 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git://github.com/vieira/homebridge-yeelight-wifi.git"
+    "url": "git://github.com/WhyElEss/homebridge-yeelight-wifi.git"
   },
   "author": {
     "name": "vieira"
   },
   "bugs": {
-    "url": "http://github.com/vieira/homebridge-yeelight-wifi/issues"
+    "url": "http://github.com/WhyElEss/homebridge-yeelight-wifi/issues"
   },
   "contributors": [
     {
