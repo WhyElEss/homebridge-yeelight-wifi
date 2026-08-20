@@ -45,6 +45,7 @@
   "scripts": {
     "prepare": "husky install || exit 0",
     "start": "DEBUG=Yeelight homebridge -D -R -P . -U ./homebridge",
+    "test": "node test/plugin.test.js",
     "format": "prettier --write \"**/*.{js,md}\"",
     "posttest": "npm run format"
   },
