@@ -184,7 +184,7 @@ Per-lamp settings. A lamp that is not listed still works, on the platform defaul
 - `id` — how the lamp is identified. Any of the three forms it answers to: the full id (`0x000000001778cb4e`), its last six characters (`78cb4e`, which is what the log prints as `Received advertisement from 78cb4e`), or the `<model>-<id>` name (`bslamp3-78cb4e`). Case-insensitive.
 - `name` — the name shown in HomeKit. Defaults to `<model>-<id>`.
 - `hidden` — `true` keeps the lamp out of HomeKit entirely.
-- `blacklist` — capabilities to keep out of HomeKit for this lamp. The values are the lamp's own method names, which the settings form shows under readable titles: `set_bright` brightness, `set_hsv` colour, `set_ct_abx` colour temperature (hiding it also removes Adaptive Lighting), `active_mode` moonlight mode, `bg_set_power` / `bg_set_bright` / `bg_set_hsv` the backlight.
+- `blacklist` — capabilities to keep out of HomeKit for this lamp. Edited in the JSON editor rather than the settings form, which has no widget that renders a list like this legibly. The values are the lamp's own method names, which the settings form shows under readable titles: `set_bright` brightness, `set_hsv` colour, `set_ct_abx` colour temperature (hiding it also removes Adaptive Lighting), `active_mode` moonlight mode, `bg_set_power` / `bg_set_bright` / `bg_set_hsv` the backlight.
 - `alert` — the same shape as the platform-level [`alert`](#alert) block, overriding it for this lamp; anything left out is inherited. `false` switches the alert off for this lamp alone, `true` switches it on with the platform's colour.
 
 A rename here is applied on every launch, not only when the accessory is first created.

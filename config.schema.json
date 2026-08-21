@@ -20,29 +20,23 @@
             "title": "Add an alert switch to every lamp",
             "type": "boolean",
             "default": false,
-            "description": "Gives every colour-capable lamp a \"<name> Alert\" switch. Switching it on takes that lamp to the colour below and remembers what it was doing; switching it off puts it back exactly, Adaptive Lighting included. A lamp listed under Devices can override any of this for itself."
+            "description": "Gives every colour-capable lamp a second accessory — a plain switch named after it, like “Entrance Night Light Alert”. Switching it on takes that lamp to the colour below and remembers what it was doing; switching it off puts it back exactly, Adaptive Lighting included. A lamp listed under Devices can override any of this for itself."
           },
           "hue": {
             "title": "Default Alert Hue (0-360)",
             "type": "integer",
             "default": 0,
-            "minimum": 0,
-            "maximum": 360,
             "description": "0 red · 30 orange · 50 yellow · 120 green · 195 cyan · 240 blue · 280 purple · 320 pink"
           },
           "saturation": {
             "title": "Default Alert Saturation (0-100)",
             "type": "integer",
             "default": 100,
-            "minimum": 0,
-            "maximum": 100,
             "description": "100 is the pure colour; lower values wash it out towards white."
           },
           "brightness": {
             "title": "Default Alert Brightness (1-100)",
             "type": "integer",
-            "minimum": 1,
-            "maximum": 100,
             "description": "Leave empty to keep whatever brightness the lamp already had, which is also one command less on the wire."
           }
         }
@@ -149,12 +143,12 @@
               "title": "Device ID",
               "type": "string",
               "required": true,
-              "description": "The full id (0x000000001778cb4e), its last six characters (78cb4e), or the <model>-<id> name (bslamp3-78cb4e) — whichever you find readable."
+              "description": "The full id (0x000000001778cb4e), its last six characters (78cb4e), or the model-and-id name (bslamp3-78cb4e) — whichever you find readable. It is printed in the log."
             },
             "name": {
               "title": "Name",
               "type": "string",
-              "description": "The name shown in HomeKit. Defaults to <model>-<id>."
+              "description": "The name shown in HomeKit. Defaults to the model and id, like bslamp3-78cb4e."
             },
             "hidden": {
               "title": "Hide this lamp",
@@ -164,7 +158,7 @@
             "blacklist": {
               "title": "Hide from HomeKit",
               "type": "array",
-              "description": "Anything ticked here is not exposed for this lamp. Everything the lamp supports is exposed by default.",
+              "description": "Advanced, and edited in the JSON editor: the lamp capabilities to keep out of HomeKit.",
               "items": {
                 "type": "string",
                 "oneOf": [
@@ -210,22 +204,16 @@
                 "hue": {
                   "title": "Alert Hue for this lamp (0-360)",
                   "type": "integer",
-                  "minimum": 0,
-                  "maximum": 360,
                   "description": "Leave empty to use the default colour set above. 0 red · 30 orange · 50 yellow · 120 green · 195 cyan · 240 blue · 280 purple · 320 pink"
                 },
                 "saturation": {
                   "title": "Alert Saturation for this lamp (0-100)",
                   "type": "integer",
-                  "minimum": 0,
-                  "maximum": 100,
                   "description": "Leave empty to use the default."
                 },
                 "brightness": {
                   "title": "Alert Brightness for this lamp (1-100)",
                   "type": "integer",
-                  "minimum": 1,
-                  "maximum": 100,
                   "description": "Leave empty to use the default, which is to keep whatever brightness the lamp already had."
                 }
               }
@@ -275,7 +263,6 @@
         "devices[].id",
         "devices[].name",
         "devices[].hidden",
-        "devices[].blacklist",
         "devices[].alert.enabled",
         "devices[].alert.hue",
         "devices[].alert.saturation",
