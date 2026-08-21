@@ -15,21 +15,23 @@ const pipe =
   (x) =>
     fns.reduce((v, f) => f(v), x);
 
-const getName = (devId, config) =>
-  (config &&
-    config.defaultValue &&
-    config.defaultValue[devId] &&
-    config.defaultValue[devId].name) ||
-  devId;
+// A defaultValue entry may be keyed either by the six characters of the device
+// id, which is what the README has always documented and what the blacklist
+// looked up, or by the full <model>-<id> name, which is what the name lookup
+// actually used. Both work now, because one of them silently doing nothing is
+// a trap.
+const deviceEntry = (config, keys) =>
+  keys
+    .map((key) => config && config.defaultValue && config.defaultValue[key])
+    .find((entry) => entry !== undefined) || {};
+
+const getName = (devId, config, ...alt) =>
+  deviceEntry(config, [devId, ...alt]).name || devId;
 
 const getDeviceId = (id) => id.slice(-6);
 
-const blacklist = (devId, config) =>
-  (config &&
-    config.defaultValue &&
-    config.defaultValue[devId] &&
-    config.defaultValue[devId].blacklist) ||
-  [];
+const blacklist = (devId, config, ...alt) =>
+  deviceEntry(config, [devId, ...alt]).blacklist || [];
 
 const handle =
   (handlers = []) =>

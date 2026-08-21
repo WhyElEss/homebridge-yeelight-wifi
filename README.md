@@ -175,7 +175,7 @@ How long, in milliseconds, the lamp takes to fade to a new value. Applies to the
 
 ### `defaultValue`
 
-Keyed by the last six characters of the device id, which appear in the log as `Received advertisement from 78cb4e`.
+Keyed either by the last six characters of the device id, which appear in the log as `Received advertisement from 78cb4e`, or by the full `<model>-<id>` name — whichever you find easier to read in a config file.
 
 - `name` — the name shown in HomeKit. Defaults to `<model>-<id>`, e.g. `bslamp3-78cb4e`.
 - `blacklist` — an array of capabilities to hide from HomeKit (`set_hsv`, `set_ct_abx`, `set_bright`, `active_mode`, …), or `true` to hide the device entirely.

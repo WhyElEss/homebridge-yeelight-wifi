@@ -1,6 +1,6 @@
 {
   "name": "homebridge-yeelight-wifi",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "description": "Homebridge plugin for YeeLight bulbs & lamps, paced to stay inside the firmware's LAN command quota.",
   "license": "MIT",
   "keywords": [
