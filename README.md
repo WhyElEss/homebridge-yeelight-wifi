@@ -148,7 +148,7 @@ Full, with defaults shown:
         {
           "id": "0x000000001778cb4e",
           "name": "Kitchen",
-          "powerOn": { "brightness": 100 },
+          "powerOn": { "brightness": 100, "kelvin": 2700 },
           "alert": { "enabled": true, "hue": 240, "saturation": 100 }
         }
       ]
@@ -180,7 +180,7 @@ Per-lamp settings. A lamp that is not listed still works, on the platform defaul
 - `name` — the name shown in HomeKit. Defaults to `<model>-<id>`.
 - `hidden` — `true` keeps the lamp out of HomeKit entirely.
 - `blacklist` — capabilities to keep out of HomeKit for this lamp. Edited in the JSON editor rather than the settings form, which has no widget that renders a list like this legibly. The values are the lamp's own method names, which the settings form shows under readable titles: `set_bright` brightness, `set_hsv` colour, `set_ct_abx` colour temperature (hiding it also removes Adaptive Lighting), `active_mode` moonlight mode, `bg_set_power` / `bg_set_bright` / `bg_set_hsv` the backlight.
-- `powerOn.brightness` — the brightness this lamp wakes at when it is switched on by hand. See [Waking a lamp](#waking-a-lamp).
+- `powerOn.brightness` — the brightness this lamp wakes at when it is switched on by hand, and `powerOn.kelvin` — the white it wakes at when no Adaptive Lighting transition is running. See [Waking a lamp](#waking-a-lamp).
 - `alert` — gives this lamp an alert switch and sets its colour. See [`devices[].alert`](#devicesalert).
 
 A rename here is applied on every launch, not only when the accessory is first created.
@@ -212,10 +212,15 @@ Set `interface` to a specific address when the host has several and discovery bi
 
 Switching a lamp on without saying anything else — a tap in the Home app, an iOS widget, Siri, a scene that only writes `On` — sends a bare power-on, and the lamp comes back exactly where it was left. After an evening at 10 % in a warm colour, that is not what anyone means by "on".
 
-Two things happen on a bare power-on:
+A lamp that was told how to wake — `powerOn.brightness`, `powerOn.kelvin`, or both — comes up **white**, never in a colour it happens to have been left in, at:
 
-- **Brightness.** `powerOn.brightness` on the lamp is what it wakes at. Zero, the default, leaves it wherever it was left.
-- **Adaptive Lighting.** A lamp with a running transition wakes at the transition's _current_ colour temperature, not the one it was switched off at.
+- the current point of a running **Adaptive Lighting** transition, if there is one;
+- otherwise `powerOn.kelvin`, the temperature this lamp was told to wake at;
+- otherwise the last white temperature it knew.
+
+`powerOn.brightness` is the brightness it wakes at; zero, the default, leaves the brightness alone. A lamp with a running transition wakes on the curve whether it was configured or not — that has always been this plugin's behaviour on a manual power-on.
+
+What the plugin cannot do is _arm_ Adaptive Lighting. Only the Home app writes the transition, and HomeKit switches it off the moment anyone picks a colour by hand — so such a lamp wakes white at the temperature above, but with the transition still off until Home turns it back on.
 
 Both ride along in the single `set_scene` that switches the lamp on, so waking a lamp still costs one command. Earlier versions put the temperature back in a second command sent after the power, with the value decremented by one mired each time to get past the "same value, skip" check — a lamp that was switched on often drifted measurably away from the curve.
 
