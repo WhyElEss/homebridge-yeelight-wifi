@@ -104,6 +104,8 @@ Out of the factory the API is disabled. Open the YeeLight app, go to the device'
 
 ## Configuration
 
+The plugin ships a `config.schema.json`, so the Homebridge UI renders a settings form for everything below — including the alert colour. Per-lamp entries under `defaultValue` are a map keyed by device id, which a generated form cannot render, so those stay in the JSON editor; the form leaves them alone.
+
 Minimal — every option below has a working default:
 
 ```json

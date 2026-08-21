@@ -1,0 +1,208 @@
+{
+  "pluginAlias": "yeelight",
+  "pluginType": "platform",
+  "singular": true,
+  "headerDisplay": "Lamps are discovered over SSDP, so nothing here is required — every field has a working default. Per-lamp names and overrides live under `defaultValue`, which is a map keyed by device id and so is edited in the JSON editor rather than here; this form leaves it untouched.",
+  "footerDisplay": "See the [README](https://github.com/WhyElEss/homebridge-yeelight-wifi#readme) for what each setting does and why the defaults are what they are.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Platform Name",
+        "type": "string",
+        "default": "Yeelight",
+        "required": true
+      },
+      "alert": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "title": "Alert switch",
+            "type": "boolean",
+            "default": false,
+            "description": "Adds a \"<name> Alert\" switch to every colour-capable lamp. Switching it on takes the lamp to the colour below and remembers what it was doing; switching it off puts it back exactly, Adaptive Lighting included."
+          },
+          "hue": {
+            "title": "Alert Hue (0-360)",
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 360,
+            "description": "0 red · 30 orange · 50 yellow · 120 green · 195 cyan · 240 blue · 280 purple · 320 pink"
+          },
+          "saturation": {
+            "title": "Alert Saturation (0-100)",
+            "type": "integer",
+            "default": 100,
+            "minimum": 0,
+            "maximum": 100,
+            "description": "100 is the pure colour; lower values wash it out towards white."
+          },
+          "brightness": {
+            "title": "Alert Brightness (1-100)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Leave empty to keep whatever brightness the lamp already had, which is also one command less on the wire."
+          }
+        }
+      },
+      "transitions": {
+        "type": "object",
+        "properties": {
+          "power": {
+            "title": "Power (ms)",
+            "type": "integer",
+            "default": 400,
+            "minimum": 0
+          },
+          "brightness": {
+            "title": "Brightness (ms)",
+            "type": "integer",
+            "default": 400,
+            "minimum": 0
+          },
+          "color": {
+            "title": "Colour (ms)",
+            "type": "integer",
+            "default": 400,
+            "minimum": 0
+          },
+          "temperature": {
+            "title": "Colour Temperature (ms)",
+            "type": "integer",
+            "default": 400,
+            "minimum": 0
+          }
+        }
+      },
+      "connection": {
+        "type": "object",
+        "properties": {
+          "timeout": {
+            "title": "Reply Timeout (ms)",
+            "type": "integer",
+            "default": 2000,
+            "minimum": 200,
+            "description": "Lamps on Wi-Fi routinely need 100-200 ms, so anything under ~1000 mostly measures the network."
+          },
+          "retries": {
+            "title": "Retries",
+            "type": "integer",
+            "default": 1,
+            "minimum": 0,
+            "maximum": 5,
+            "description": "Extra attempts after a failure, each on a fresh connection. A command is never written twice to the same socket."
+          },
+          "connectTimeout": {
+            "title": "Connect Timeout (ms)",
+            "type": "integer",
+            "default": 5000,
+            "minimum": 500
+          },
+          "quota": {
+            "title": "Commands per minute",
+            "type": "integer",
+            "default": 55,
+            "minimum": 1,
+            "maximum": 60,
+            "description": "The firmware allows 60 and hangs up when that is exceeded, so the default leaves a margin. Raising this is how lamps used to go deaf mid-automation."
+          },
+          "coalesce": {
+            "title": "Coalescing Window (ms)",
+            "type": "integer",
+            "default": 80,
+            "minimum": 0,
+            "description": "Characteristic writes landing inside this window are merged into one command. Raising it merges more; lowering it makes the lamp react sooner."
+          },
+          "keepAlive": {
+            "title": "TCP Keep-Alive (ms)",
+            "type": "integer",
+            "default": 30000,
+            "minimum": 1000
+          }
+        }
+      },
+      "multicast": {
+        "type": "object",
+        "properties": {
+          "interface": {
+            "title": "Multicast Interface",
+            "type": "string",
+            "placeholder": "0.0.0.0",
+            "description": "Set a specific address when the host has several and discovery binds to the wrong one."
+          }
+        }
+      },
+      "defaultValue": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  },
+  "layout": [
+    "name",
+    {
+      "type": "fieldset",
+      "title": "Alert switch",
+      "expandable": true,
+      "expanded": true,
+      "items": [
+        "alert.enabled",
+        {
+          "key": "alert.hue",
+          "condition": {
+            "functionBody": "return model.alert && model.alert.enabled"
+          }
+        },
+        {
+          "key": "alert.saturation",
+          "condition": {
+            "functionBody": "return model.alert && model.alert.enabled"
+          }
+        },
+        {
+          "key": "alert.brightness",
+          "condition": {
+            "functionBody": "return model.alert && model.alert.enabled"
+          }
+        }
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Connection",
+      "description": "These pace the plugin inside the lamp's LAN command budget. The defaults were measured against real hardware.",
+      "expandable": true,
+      "expanded": false,
+      "items": [
+        "connection.timeout",
+        "connection.retries",
+        "connection.connectTimeout",
+        "connection.quota",
+        "connection.coalesce",
+        "connection.keepAlive"
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Transitions",
+      "description": "How long the lamp takes to fade to a new value. Waking a lamp uses set_scene, which the firmware applies without a transition.",
+      "expandable": true,
+      "expanded": false,
+      "items": [
+        "transitions.power",
+        "transitions.brightness",
+        "transitions.color",
+        "transitions.temperature"
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Discovery",
+      "expandable": true,
+      "expanded": false,
+      "items": ["multicast.interface"]
+    }
+  ]
+}
