@@ -104,7 +104,7 @@ Out of the factory the API is disabled. Open the YeeLight app, go to the device'
 
 ## Configuration
 
-The plugin ships a `config.schema.json`, so the Homebridge UI renders a settings form for everything below — including the alert colour. Per-lamp entries under `defaultValue` are a map keyed by device id, which a generated form cannot render, so those stay in the JSON editor; the form leaves them alone.
+The plugin ships a `config.schema.json`, so the Homebridge UI renders a settings form for everything below — the alert colour, the per-lamp entries under **Devices**, and the connection budget.
 
 Minimal — every option below has a working default:
 
@@ -149,12 +149,14 @@ Full, with defaults shown:
         "hue": 0,
         "saturation": 100
       },
-      "defaultValue": {
-        "aed78s": {
+      "devices": [
+        {
+          "id": "0x000000001778cb4e",
           "name": "Kitchen",
-          "blacklist": ["set_hsv"]
+          "blacklist": ["set_hsv"],
+          "alert": { "hue": 240 }
         }
-      }
+      ]
     }
   ]
 }
@@ -175,13 +177,21 @@ How long, in milliseconds, the lamp takes to fade to a new value. Applies to the
 | `coalesce` | `80` | Window, in ms, over which characteristic writes are merged into one command. Raising it merges more; lowering it makes the lamp react sooner. |
 | `keepAlive` | `30000` | TCP keep-alive interval, so a half-open socket is noticed instead of swallowing commands. |
 
-### `defaultValue`
+### `devices`
 
-Keyed either by the last six characters of the device id, which appear in the log as `Received advertisement from 78cb4e`, or by the full `<model>-<id>` name — whichever you find easier to read in a config file.
+Per-lamp settings. A lamp that is not listed still works, on the platform defaults.
 
-- `name` — the name shown in HomeKit. Defaults to `<model>-<id>`, e.g. `bslamp3-78cb4e`.
-- `blacklist` — an array of capabilities to hide from HomeKit (`set_hsv`, `set_ct_abx`, `set_bright`, `active_mode`, …), or `true` to hide the device entirely.
-- `alert` — the same shape as the platform-level [`alert`](#alert) block, overriding it for this lamp. `false` switches the alert switch off for this lamp alone, `true` switches it on with the platform's colour.
+- `id` — how the lamp is identified. Any of the three forms it answers to: the full id (`0x000000001778cb4e`), its last six characters (`78cb4e`, which is what the log prints as `Received advertisement from 78cb4e`), or the `<model>-<id>` name (`bslamp3-78cb4e`). Case-insensitive.
+- `name` — the name shown in HomeKit. Defaults to `<model>-<id>`.
+- `hidden` — `true` keeps the lamp out of HomeKit entirely.
+- `blacklist` — capabilities to hide from HomeKit for this lamp (`set_hsv`, `set_ct_abx`, `set_bright`, `active_mode`, …).
+- `alert` — the same shape as the platform-level [`alert`](#alert) block, overriding it for this lamp; anything left out is inherited. `false` switches the alert off for this lamp alone, `true` switches it on with the platform's colour.
+
+A rename here is applied on every launch, not only when the accessory is first created.
+
+### `defaultValue` (legacy)
+
+The map this plugin used before `devices`, keyed the same three ways. Still read, and still supported, but `devices` takes precedence and is the one the Homebridge UI can render as a form.
 
 ### `alert`
 

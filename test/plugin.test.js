@@ -525,6 +525,111 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 18
+  console.log('\n18. Per-lamp config: devices[], defaultValue, and the keys');
+  {
+    const {
+      getName,
+      blacklist,
+      deviceEntry,
+      resolveAlert,
+    } = require('../utils');
+    const full = '0x000000001778cb4e';
+    const keys = ['bslamp3-78cb4e', '78cb4e', full];
+
+    const byDevices = {
+      alert: { enabled: true, hue: 0, saturation: 100 },
+      devices: [
+        { id: full, name: 'Main Bedroom', alert: { hue: 240 } },
+        { id: 'aaaaaa', name: 'Other' },
+      ],
+    };
+    check(
+      'a lamp is found by its full id',
+      getName(byDevices, keys) === 'Main Bedroom',
+      getName(byDevices, keys)
+    );
+    check(
+      'per-lamp colour overrides the platform, the rest is inherited',
+      JSON.stringify(resolveAlert(byDevices, deviceEntry(byDevices, keys))) ===
+        JSON.stringify({ enabled: true, hue: 240, saturation: 100 }),
+      JSON.stringify(resolveAlert(byDevices, deviceEntry(byDevices, keys)))
+    );
+
+    const shortKey = { devices: [{ id: '78cb4e', name: 'Short' }] };
+    const modelKey = { devices: [{ id: 'BSLAMP3-78CB4E', name: 'Model' }] };
+    check('found by six characters', getName(shortKey, keys) === 'Short', '');
+    check(
+      'found by <model>-<id>, case-insensitively',
+      getName(modelKey, keys) === 'Model',
+      getName(modelKey, keys)
+    );
+
+    const legacy = {
+      alert: { enabled: true },
+      defaultValue: { '78cb4e': { name: 'Legacy', alert: false } },
+    };
+    check(
+      'defaultValue still works',
+      getName(legacy, keys) === 'Legacy',
+      getName(legacy, keys)
+    );
+    check(
+      'a lamp can opt out of the alert',
+      resolveAlert(legacy, deviceEntry(legacy, keys)).enabled === false,
+      JSON.stringify(resolveAlert(legacy, deviceEntry(legacy, keys)))
+    );
+
+    const both = {
+      devices: [{ id: '78cb4e', name: 'From devices' }],
+      defaultValue: { '78cb4e': { name: 'From defaultValue' } },
+    };
+    check(
+      'devices[] wins over defaultValue',
+      getName(both, keys) === 'From devices',
+      getName(both, keys)
+    );
+
+    check(
+      'unlisted lamps keep the generated name',
+      getName({ devices: [] }, keys) === 'bslamp3-78cb4e',
+      getName({ devices: [] }, keys)
+    );
+    check(
+      'hidden hides the lamp entirely',
+      blacklist({ devices: [{ id: '78cb4e', hidden: true }] }, keys) === true,
+      ''
+    );
+    check(
+      'a capability list is passed through',
+      JSON.stringify(
+        blacklist({ devices: [{ id: '78cb4e', blacklist: ['set_hsv'] }] }, keys)
+      ) === '["set_hsv"]',
+      ''
+    );
+    check(
+      'out-of-range values are clamped',
+      JSON.stringify(
+        resolveAlert(
+          { alert: { enabled: true, hue: 999, saturation: -5, brightness: 0 } },
+          {}
+        )
+      ) ===
+        JSON.stringify({
+          enabled: true,
+          hue: 360,
+          saturation: 0,
+          brightness: 1,
+        }),
+      JSON.stringify(
+        resolveAlert(
+          { alert: { enabled: true, hue: 999, saturation: -5, brightness: 0 } },
+          {}
+        )
+      )
+    );
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }

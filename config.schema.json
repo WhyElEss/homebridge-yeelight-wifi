@@ -2,7 +2,7 @@
   "pluginAlias": "yeelight",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": "Lamps are discovered over SSDP, so nothing here is required — every field has a working default. Per-lamp names and overrides live under `defaultValue`, which is a map keyed by device id and so is edited in the JSON editor rather than here; this form leaves it untouched.",
+  "headerDisplay": "Lamps are discovered over SSDP, so nothing here is required — every field has a working default. Add a lamp under **Devices** only to give it a name or to change how it behaves; the id it answers to is printed in the log as `Received advertisement from 78cb4e`.",
   "footerDisplay": "See the [README](https://github.com/WhyElEss/homebridge-yeelight-wifi#readme) for what each setting does and why the defaults are what they are.",
   "schema": {
     "type": "object",
@@ -137,6 +137,78 @@
       "defaultValue": {
         "type": "object",
         "additionalProperties": true
+      },
+      "devices": {
+        "title": "Devices",
+        "type": "array",
+        "description": "Per-lamp settings. Lamps not listed here still work with the platform defaults.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "title": "Device ID",
+              "type": "string",
+              "required": true,
+              "description": "The full id (0x000000001778cb4e), its last six characters (78cb4e), or the <model>-<id> name (bslamp3-78cb4e) — whichever you find readable."
+            },
+            "name": {
+              "title": "Name",
+              "type": "string",
+              "description": "The name shown in HomeKit. Defaults to <model>-<id>."
+            },
+            "hidden": {
+              "title": "Hide this lamp",
+              "type": "boolean",
+              "description": "Keeps the lamp out of HomeKit entirely."
+            },
+            "blacklist": {
+              "title": "Hidden capabilities",
+              "type": "array",
+              "description": "Capabilities to keep out of HomeKit for this lamp.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "set_bright",
+                  "set_hsv",
+                  "set_ct_abx",
+                  "active_mode",
+                  "bg_set_power",
+                  "bg_set_bright",
+                  "bg_set_hsv"
+                ]
+              }
+            },
+            "alert": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "title": "Alert switch",
+                  "type": "boolean",
+                  "description": "Overrides the platform setting for this lamp alone."
+                },
+                "hue": {
+                  "title": "Alert Hue (0-360)",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 360,
+                  "description": "Leave empty to use the platform's colour."
+                },
+                "saturation": {
+                  "title": "Alert Saturation (0-100)",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "brightness": {
+                  "title": "Alert Brightness (1-100)",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -167,6 +239,23 @@
             "functionBody": "return model.alert && model.alert.enabled"
           }
         }
+      ]
+    },
+    {
+      "key": "devices",
+      "type": "array",
+      "title": "Devices",
+      "expandable": true,
+      "expanded": true,
+      "items": [
+        "devices[].id",
+        "devices[].name",
+        "devices[].hidden",
+        "devices[].blacklist",
+        "devices[].alert.enabled",
+        "devices[].alert.hue",
+        "devices[].alert.saturation",
+        "devices[].alert.brightness"
       ]
     },
     {

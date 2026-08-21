@@ -15,23 +15,70 @@ const pipe =
   (x) =>
     fns.reduce((v, f) => f(v), x);
 
-// A defaultValue entry may be keyed either by the six characters of the device
-// id, which is what the README has always documented and what the blacklist
-// looked up, or by the full <model>-<id> name, which is what the name lookup
-// actually used. Both work now, because one of them silently doing nothing is
-// a trap.
-const deviceEntry = (config, keys) =>
-  keys
-    .map((key) => config && config.defaultValue && config.defaultValue[key])
-    .find((entry) => entry !== undefined) || {};
+// Per-lamp settings live in the `devices` array, which is what the Homebridge
+// UI can render. `defaultValue`, the map this plugin has always used, still
+// works and is searched second. Either accepts any of the three ways a lamp is
+// identified: the full id, its last six characters, or the <model>-<id> name
+// shown in HomeKit - one of them silently doing nothing is a trap.
+const deviceEntry = (config, keys) => {
+  const wanted = keys.filter(Boolean).map((key) => String(key).toLowerCase());
+  const devices = (config && config.devices) || [];
+  const listed = devices.find(
+    (device) =>
+      device && device.id && wanted.includes(String(device.id).toLowerCase())
+  );
+  if (listed) return listed;
 
-const getName = (devId, config, ...alt) =>
-  deviceEntry(config, [devId, ...alt]).name || devId;
+  return (
+    keys
+      .map((key) => config && config.defaultValue && config.defaultValue[key])
+      .find((entry) => entry !== undefined) || {}
+  );
+};
+
+// Falls back to the first key, which is the <model>-<id> name a lamp shows in
+// HomeKit when nothing else was configured for it.
+const getName = (config, keys) => deviceEntry(config, keys).name || keys[0];
 
 const getDeviceId = (id) => id.slice(-6);
 
-const blacklist = (devId, config, ...alt) =>
-  deviceEntry(config, [devId, ...alt]).blacklist || [];
+// Returns `true` to hide the lamp entirely, or the list of capabilities to
+// keep out of HomeKit. `hidden` is the form-friendly spelling of the older
+// `blacklist: true`.
+const blacklist = (config, keys) => {
+  const entry = deviceEntry(config, keys);
+  if (entry.hidden === true) return true;
+  return entry.blacklist || [];
+};
+
+const clamp = (value, min, max) => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return undefined;
+  return Math.min(Math.max(number, min), max);
+};
+
+// The platform-level alert block, overridden by the lamp's own. `false` and
+// `true` are shorthands for switching a single lamp off, or on with the
+// platform's colour.
+const resolveAlert = (config, entry) => {
+  const perDevice = entry.alert;
+  if (perDevice === false) return { enabled: false };
+
+  const alert = Object.assign(
+    { enabled: false },
+    config && config.alert,
+    perDevice === true ? { enabled: true } : perDevice
+  );
+
+  if (!alert.enabled) return { enabled: false };
+
+  return {
+    enabled: true,
+    hue: clamp(alert.hue, 0, 360) ?? 0,
+    saturation: clamp(alert.saturation, 0, 100) ?? 100,
+    brightness: clamp(alert.brightness, 1, 100),
+  };
+};
 
 const handle =
   (handlers = []) =>
@@ -462,6 +509,8 @@ module.exports = {
   getDeviceId,
   getName,
   blacklist,
+  deviceEntry,
+  resolveAlert,
   handle,
   sleep,
   pipe,

@@ -10,7 +10,15 @@ const Backlight = require('./bulbs/backlight/bulb');
 const BacklightBrightness = require('./bulbs/backlight/brightness');
 const BacklightColor = require('./bulbs/backlight/color');
 const alertAccessory = require('./alert-accessory');
-const { getDeviceId, getName, blacklist, sleep, pipe } = require('./utils');
+const {
+  getDeviceId,
+  getName,
+  blacklist,
+  deviceEntry,
+  resolveAlert,
+  sleep,
+  pipe,
+} = require('./utils');
 
 // Lamps re-announce themselves unprompted, so the active search only has to
 // cover the gap right after a restart instead of running forever.
@@ -144,8 +152,11 @@ class YeePlatform {
 
   buildDevice(endpoint, { id, model, support, ...props }) {
     const deviceId = getDeviceId(id);
-    const name = getName(`${model}-${deviceId}`, this.config, deviceId);
-    const hidden = blacklist(deviceId, this.config, `${model}-${deviceId}`);
+    // A lamp answers to all three of these, so a config entry may use whichever
+    // its author finds readable.
+    const keys = [`${model}-${deviceId}`, deviceId, id];
+    const name = getName(this.config, keys);
+    const hidden = blacklist(this.config, keys);
     let accessory = this.devices[id];
 
     if (hidden === true) {
@@ -232,7 +243,7 @@ class YeePlatform {
       mixins.push(BacklightColor);
     }
 
-    const alert = this.alertFor(model, deviceId, features, name);
+    const alert = this.alertFor(keys, features, name);
 
     // Applied last so its setTemperature override wraps the temperature
     // mixin's, which is what lets it swallow background Adaptive Lighting
@@ -252,28 +263,10 @@ class YeePlatform {
     return bulb;
   }
 
-  // Alert settings come from the platform block and can be overridden per
-  // lamp under defaultValue, keyed either by the six-character device id or by
-  // the full <model>-<id> name. `false` there switches a single lamp off.
-  clamp(value, min, max) {
-    if (!Number.isFinite(Number(value))) return undefined;
-    return Math.min(Math.max(Number(value), min), max);
-  }
-
-  alertFor(model, deviceId, features, name) {
-    const perDevice = [`${model}-${deviceId}`, deviceId]
-      .map((key) => this.config?.defaultValue?.[key]?.alert)
-      .find((value) => value !== undefined);
-
-    if (perDevice === false) return { enabled: false };
-
-    const alert = Object.assign(
-      { enabled: false },
-      this.config?.alert,
-      perDevice === true ? { enabled: true } : perDevice
-    );
-
-    if (!alert.enabled) return { enabled: false };
+  // The platform's alert block, overridden by the lamp's own entry.
+  alertFor(keys, features, name) {
+    const alert = resolveAlert(this.config, deviceEntry(this.config, keys));
+    if (!alert.enabled) return alert;
 
     // An alert is a colour, so a lamp that cannot take one has nothing to show.
     if (!features.includes('set_hsv')) {
@@ -283,12 +276,7 @@ class YeePlatform {
       return { enabled: false };
     }
 
-    return {
-      enabled: true,
-      hue: this.clamp(alert.hue, 0, 360) ?? 0,
-      saturation: this.clamp(alert.saturation, 0, 100) ?? 100,
-      brightness: this.clamp(alert.brightness, 1, 100),
-    };
+    return alert;
   }
 
   // Models are numbered variants of a family (bslamp1, bslamp2, bslamp3) but
