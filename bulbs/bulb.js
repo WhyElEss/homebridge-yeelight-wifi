@@ -598,13 +598,30 @@ class YeeBulb {
       return desired;
     }
 
+    const { brightness, kelvin } = this.powerOn;
     const patch = {};
-    const { brightness } = this.powerOn;
-    if (Number.isFinite(brightness) && brightness > 0)
-      patch.bright = brightness;
-    if (this.adaptiveLighting && Number.isFinite(this.temperature)) {
-      patch.ct = this.temperature;
-    }
+    if (brightness) patch.bright = brightness;
+
+    // Always white, not only while a transition happens to be running: a lamp
+    // last left in a colour would otherwise wake up in it, and the whole point
+    // of a configured power-on is that a tap on a widget needs no follow-up.
+    // A running transition's temperature is the best value there is; failing
+    // that, whatever this lamp was told to wake at; failing that, the last
+    // white it knew. Left unrounded - a configured 2700 K is 370.37 mired, and
+    // rounding here would put 2703 K on the wire.
+    // A running transition sets the temperature whether this lamp was
+    // configured or not - that is what the plugin has always done on a manual
+    // power-on. Without one, only a lamp that was told how to wake is taken to
+    // white; the rest are left exactly where they were.
+    const mired = this.adaptiveLighting
+      ? this.temperature
+      : brightness || kelvin
+      ? kelvin
+        ? 10 ** 6 / kelvin
+        : this.temperature
+      : undefined;
+    if (Number.isFinite(mired)) patch.ct = mired;
+
     if (!Object.keys(patch).length) return desired;
 
     this.log.debug(

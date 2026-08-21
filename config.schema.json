@@ -209,7 +209,15 @@
                   "default": 0,
                   "minimum": 0,
                   "maximum": 100,
-                  "description": "Switching this lamp on without saying anything else — the Home app, a widget, Siri — brings it up at this brightness. 0 leaves it wherever it was left. A lamp running Adaptive Lighting also comes up at the transition's current colour temperature, in the same single command. A scene that carries its own brightness or colour is left alone."
+                  "description": "Switching this lamp on without saying anything else — the Home app, a widget, Siri — brings it up at this brightness and in white, never in a colour it was left in. 0 leaves the lamp exactly where it was left. A scene that carries its own brightness or colour is left alone."
+                },
+                "kelvin": {
+                  "title": "Colour temperature when switched on by hand",
+                  "type": "integer",
+                  "default": 0,
+                  "minimum": 1700,
+                  "maximum": 6500,
+                  "description": "Kelvin. Used when Adaptive Lighting is not running — while it is, the lamp wakes at the transition's current temperature instead. 0 wakes it at the last white temperature it knew. Warm white is around 2700, daylight around 5000."
                 }
               }
             }
@@ -231,6 +239,7 @@
         "devices[].name",
         "devices[].hidden",
         "devices[].powerOn.brightness",
+        "devices[].powerOn.kelvin",
         "devices[].alert.enabled",
         {
           "key": "devices[].alert.hue",

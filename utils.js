@@ -61,7 +61,10 @@ const clamp = (value, min, max) => {
 // the default, leaves the lamp waking wherever it was left.
 const resolvePowerOn = (entry) => {
   const powerOn = entry.powerOn || {};
-  return { brightness: clamp(powerOn.brightness, 0, 100) || undefined };
+  return {
+    brightness: clamp(powerOn.brightness, 0, 100) || undefined,
+    kelvin: clamp(powerOn.kelvin, 1700, 6500) || undefined,
+  };
 };
 
 // A lamp's own alert block, and nothing else: an alert is either configured on

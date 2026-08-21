@@ -724,7 +724,44 @@ async function run() {
     );
     await lamp.close();
 
-    // e. nothing configured, no Adaptive Lighting: unchanged behaviour
+    // e. a lamp left in a colour still wakes white, with no transition running
+    lamp = new FakeLamp();
+    await lamp.listen();
+    made = await makeBulb(
+      lamp,
+      {},
+      { powerOn: { brightness: 100, kelvin: 2700 }, hue: '120', sat: '100' }
+    );
+    await scene(made.service, { On: true });
+    await sleep(200);
+    check(
+      'wakes white at the configured temperature, not in the colour',
+      JSON.stringify(lamp.received[0].params) ===
+        JSON.stringify(['ct', 2700, 100]),
+      JSON.stringify(lamp.received[0].params)
+    );
+    await lamp.close();
+
+    // f. a running transition beats the configured temperature
+    lamp = new FakeLamp();
+    await lamp.listen();
+    made = await makeBulb(
+      lamp,
+      {},
+      { powerOn: { brightness: 100, kelvin: 2700 } }
+    );
+    armed(made.bulb);
+    await scene(made.service, { On: true });
+    await sleep(200);
+    check(
+      'the curve wins while Adaptive Lighting is running',
+      JSON.stringify(lamp.received[0].params) ===
+        JSON.stringify(['ct', 2703, 100]),
+      JSON.stringify(lamp.received[0].params)
+    );
+    await lamp.close();
+
+    // g. nothing configured, no Adaptive Lighting: unchanged behaviour
     lamp = new FakeLamp();
     await lamp.listen();
     made = await makeBulb(lamp, {}, {});
