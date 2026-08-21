@@ -2,7 +2,7 @@
   "pluginAlias": "yeelight",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": "Lamps are discovered over SSDP, so nothing here is required — every field has a working default. Add a lamp under **Devices** only to give it a name or to change how it behaves; the id it answers to is printed in the log as `Received advertisement from 78cb4e`.",
+  "headerDisplay": "Lamps are discovered over SSDP, so nothing here is required — every field has a working default. Add a lamp under **Devices** only to name it or to make it behave differently from the rest; the id it answers to is printed in the log as `Received advertisement from 78cb4e`.",
   "footerDisplay": "See the [README](https://github.com/WhyElEss/homebridge-yeelight-wifi#readme) for what each setting does and why the defaults are what they are.",
   "schema": {
     "type": "object",
@@ -17,13 +17,13 @@
         "type": "object",
         "properties": {
           "enabled": {
-            "title": "Alert switch",
+            "title": "Add an alert switch to every lamp",
             "type": "boolean",
             "default": false,
-            "description": "Adds a \"<name> Alert\" switch to every colour-capable lamp. Switching it on takes the lamp to the colour below and remembers what it was doing; switching it off puts it back exactly, Adaptive Lighting included."
+            "description": "Gives every colour-capable lamp a \"<name> Alert\" switch. Switching it on takes that lamp to the colour below and remembers what it was doing; switching it off puts it back exactly, Adaptive Lighting included. A lamp listed under Devices can override any of this for itself."
           },
           "hue": {
-            "title": "Alert Hue (0-360)",
+            "title": "Default Alert Hue (0-360)",
             "type": "integer",
             "default": 0,
             "minimum": 0,
@@ -31,7 +31,7 @@
             "description": "0 red · 30 orange · 50 yellow · 120 green · 195 cyan · 240 blue · 280 purple · 320 pink"
           },
           "saturation": {
-            "title": "Alert Saturation (0-100)",
+            "title": "Default Alert Saturation (0-100)",
             "type": "integer",
             "default": 100,
             "minimum": 0,
@@ -39,7 +39,7 @@
             "description": "100 is the pure colour; lower values wash it out towards white."
           },
           "brightness": {
-            "title": "Alert Brightness (1-100)",
+            "title": "Default Alert Brightness (1-100)",
             "type": "integer",
             "minimum": 1,
             "maximum": 100,
@@ -159,22 +159,43 @@
             "hidden": {
               "title": "Hide this lamp",
               "type": "boolean",
-              "description": "Keeps the lamp out of HomeKit entirely."
+              "description": "Keeps the whole lamp out of HomeKit, without deleting its entry here."
             },
             "blacklist": {
-              "title": "Hidden capabilities",
+              "title": "Hide from HomeKit",
               "type": "array",
-              "description": "Capabilities to keep out of HomeKit for this lamp.",
+              "description": "Anything ticked here is not exposed for this lamp. Everything the lamp supports is exposed by default.",
               "items": {
                 "type": "string",
-                "enum": [
-                  "set_bright",
-                  "set_hsv",
-                  "set_ct_abx",
-                  "active_mode",
-                  "bg_set_power",
-                  "bg_set_bright",
-                  "bg_set_hsv"
+                "oneOf": [
+                  {
+                    "title": "Brightness",
+                    "const": "set_bright"
+                  },
+                  {
+                    "title": "Colour",
+                    "const": "set_hsv"
+                  },
+                  {
+                    "title": "Colour temperature — also removes Adaptive Lighting",
+                    "const": "set_ct_abx"
+                  },
+                  {
+                    "title": "Moonlight mode (ceiling lamps)",
+                    "const": "active_mode"
+                  },
+                  {
+                    "title": "Backlight",
+                    "const": "bg_set_power"
+                  },
+                  {
+                    "title": "Backlight brightness",
+                    "const": "bg_set_bright"
+                  },
+                  {
+                    "title": "Backlight colour",
+                    "const": "bg_set_hsv"
+                  }
                 ]
               }
             },
@@ -182,28 +203,30 @@
               "type": "object",
               "properties": {
                 "enabled": {
-                  "title": "Alert switch",
+                  "title": "Alert switch for this lamp",
                   "type": "boolean",
-                  "description": "Overrides the platform setting for this lamp alone."
+                  "description": "Overrides the platform setting: tick to give this lamp an alert switch even when the default is off, untick to leave this one lamp without one."
                 },
                 "hue": {
-                  "title": "Alert Hue (0-360)",
+                  "title": "Alert Hue for this lamp (0-360)",
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 360,
-                  "description": "Leave empty to use the platform's colour."
+                  "description": "Leave empty to use the default colour set above. 0 red · 30 orange · 50 yellow · 120 green · 195 cyan · 240 blue · 280 purple · 320 pink"
                 },
                 "saturation": {
-                  "title": "Alert Saturation (0-100)",
+                  "title": "Alert Saturation for this lamp (0-100)",
                   "type": "integer",
                   "minimum": 0,
-                  "maximum": 100
+                  "maximum": 100,
+                  "description": "Leave empty to use the default."
                 },
                 "brightness": {
-                  "title": "Alert Brightness (1-100)",
+                  "title": "Alert Brightness for this lamp (1-100)",
                   "type": "integer",
                   "minimum": 1,
-                  "maximum": 100
+                  "maximum": 100,
+                  "description": "Leave empty to use the default, which is to keep whatever brightness the lamp already had."
                 }
               }
             }
@@ -216,7 +239,7 @@
     "name",
     {
       "type": "fieldset",
-      "title": "Alert switch",
+      "title": "Alert switch — defaults for every lamp",
       "expandable": true,
       "expanded": true,
       "items": [
@@ -239,7 +262,8 @@
             "functionBody": "return model.alert && model.alert.enabled"
           }
         }
-      ]
+      ],
+      "description": "What an alert does to a lamp, unless that lamp says otherwise under Devices."
     },
     {
       "key": "devices",
@@ -256,7 +280,8 @@
         "devices[].alert.hue",
         "devices[].alert.saturation",
         "devices[].alert.brightness"
-      ]
+      ],
+      "description": "Settings for one lamp. Anything left empty here is inherited from the defaults above."
     },
     {
       "type": "fieldset",
