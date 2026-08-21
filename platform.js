@@ -182,6 +182,17 @@ class YeePlatform {
       ]);
     }
 
+    // A name from the config only ever reached a freshly created accessory, so
+    // renaming a lamp that HomeKit already knew about did nothing at all.
+    if (accessory.displayName !== name) {
+      this.log(`Renaming ${accessory.displayName} to ${name}.`);
+      accessory.displayName = name;
+      accessory
+        .getService(global.Service.AccessoryInformation)
+        .setCharacteristic(global.Characteristic.Name, name);
+      this.api.updatePlatformAccessories([accessory]);
+    }
+
     if (accessory?.initialized) return;
 
     const mixins = [];

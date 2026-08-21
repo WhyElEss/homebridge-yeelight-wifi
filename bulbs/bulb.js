@@ -62,6 +62,8 @@ class YeeBulb {
       this.accessory.getService(global.Service.Lightbulb) ||
       this.accessory.addService(new global.Service.Lightbulb(this.name));
 
+    // Carries a rename through to the service HomeKit actually shows.
+    this.service.setCharacteristic(global.Characteristic.Name, this.name);
     this.service.setPrimaryService();
 
     this.accessory.on('identify', async (_, callback) => {

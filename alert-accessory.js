@@ -41,15 +41,24 @@ function configure(platform, bulb, { id, name }) {
     ]);
   }
 
+  const alertName = `${name} Alert`;
+  if (accessory.displayName !== alertName) {
+    platform.log(`Renaming ${accessory.displayName} to ${alertName}.`);
+    accessory.displayName = alertName;
+    platform.api.updatePlatformAccessories([accessory]);
+  }
+
   accessory
     .getService(Service.AccessoryInformation)
+    .setCharacteristic(Characteristic.Name, alertName)
     .setCharacteristic(Characteristic.Manufacturer, 'YeeLight')
     .setCharacteristic(Characteristic.Model, `${bulb.model} Alert`)
     .setCharacteristic(Characteristic.SerialNumber, `${bulb.did}-alert`);
 
   const service =
     accessory.getService(Service.Switch) ||
-    accessory.addService(new Service.Switch(`${name} Alert`));
+    accessory.addService(new Service.Switch(alertName));
+  service.setCharacteristic(Characteristic.Name, alertName);
 
   const characteristic = service.getCharacteristic(Characteristic.On);
   characteristic.removeAllListeners?.('set');
