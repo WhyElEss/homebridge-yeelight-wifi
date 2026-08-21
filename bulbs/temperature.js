@@ -8,7 +8,19 @@ const Temperature = (Device) =>
       this.controller = {};
 
       const { ColorTemperature } = global.Characteristic;
-      const [minValue, maxValue] = props.limits.colorTemperature;
+      // HomeKit defines this characteristic as 140-500 mired. A bslamp3 goes
+      // down to 1700 K, which is 588, and advertising that put the lamp
+      // outside the range every controller expects - Adaptive Lighting is
+      // computed against these very bounds. The lamp keeps whatever it
+      // supports; HomeKit is told only what HomeKit understands.
+      const [rawMin, rawMax] = props.limits.colorTemperature;
+      const minValue = Math.max(140, rawMin);
+      const maxValue = Math.min(500, rawMax);
+      if (minValue !== rawMin || maxValue !== rawMax) {
+        this.log.debug(
+          `${this.tag}: colour temperature ${rawMin}-${rawMax} narrowed to ${minValue}-${maxValue} for HomeKit.`
+        );
+      }
 
       (
         this.service.getCharacteristic(ColorTemperature) ||

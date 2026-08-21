@@ -29,7 +29,8 @@ class FakeCharacteristic {
     this.value = v;
     return this;
   }
-  setProps() {
+  setProps(props) {
+    this.props = props;
     return this;
   }
   write(value, context) {

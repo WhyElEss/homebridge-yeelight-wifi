@@ -776,6 +776,63 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 20
+  console.log('\n20. HomeKit reads are answered from memory');
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(lamp, {}, { power: 'on' });
+    bulb.lastPowerRead = Date.now();
+
+    const started = Date.now();
+    const values = [];
+    for (let i = 0; i < 5; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      values.push(await service.getCharacteristic('On').read());
+    }
+    const elapsed = Date.now() - started;
+    await sleep(150);
+    check(
+      'five reads, nothing on the wire',
+      lamp.methods().length === 0,
+      `${lamp.methods()}`
+    );
+    check('the cached value came back', values.every(Boolean), `${values}`);
+    check('and it was instant', elapsed < 50, `${elapsed}ms`);
+
+    // A stale cache asks the lamp, but in the background.
+    bulb.lastPowerRead = 0;
+    await service.getCharacteristic('On').read();
+    await sleep(200);
+    check(
+      'a stale read refreshes behind HomeKit',
+      lamp.methods().length === 1 && lamp.methods()[0] === 'get_prop',
+      `${lamp.methods()}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 21
+  console.log('\n21. Colour temperature is advertised inside the HAP range');
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { service } = await makeBulb(lamp);
+    const { props } = service.getCharacteristic('ColorTemperature');
+    check(
+      '588 mired is narrowed to the 500 HomeKit defines',
+      props.maxValue === 500,
+      JSON.stringify(props)
+    );
+    check(
+      'the warm end is left alone',
+      props.minValue === 154,
+      JSON.stringify(props)
+    );
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }

@@ -40,6 +40,11 @@ class YeeBulb {
     // When a lamp exceeds its per-minute LAN quota the firmware hangs up and
     // stays deaf until it is power cycled, so we pace ourselves instead.
     this.sent = [];
+    // The lamp announces itself every few minutes and pushes property changes
+    // on an open socket, so the cache rarely needs help; this is the floor
+    // between the reads that ask for it anyway.
+    this.lastPowerRead = 0;
+    this.staleAfter = (this.config.connection || {}).staleAfter ?? 60000;
     // Commands go out one at a time: a burst of parallel writes is exactly
     // what the quota counts.
     this.queue = Promise.resolve();
@@ -84,14 +89,17 @@ class YeeBulb {
           callback(err);
         }
       })
-      .on('get', async (callback) => {
-        try {
-          const [value] = await this.getProperty(['power']);
-          this.power = value;
-          callback(null, this.power);
-        } catch (err) {
-          callback(err, this.power);
-        }
+      // Answered from memory, never from the lamp. HomeKit reads this often -
+      // opening the accessory, building a widget, configuring Adaptive
+      // Lighting - and a read that goes to the lamp costs a command out of the
+      // per-minute budget and blocks HomeKit for a LAN round-trip while it
+      // does. A burst of reads used to queue behind each other and leave the
+      // Home app spinning. The cache is kept honest by the lamp's own
+      // announcements and property notifications, plus a refresh started in
+      // the background when a read finds it stale.
+      .on('get', (callback) => {
+        callback(null, this.power);
+        this.refreshPowerInBackground();
       })
       .updateValue(this.power);
 
@@ -102,6 +110,23 @@ class YeeBulb {
 
   get tag() {
     return `${this.name} (${this.host})`;
+  }
+
+  // At most one refresh a minute, and never one that HomeKit waits on.
+  refreshPowerInBackground() {
+    const now = Date.now();
+    if (now - this.lastPowerRead < this.staleAfter) return;
+    this.lastPowerRead = now;
+    this.getProperty(['power'])
+      .then(([value]) => {
+        if (value === undefined) return;
+        this.updateStateFromProp('power', value);
+      })
+      .catch((err) => {
+        this.log.debug(
+          `${this.tag}: background power refresh failed: ${err.message || err}.`
+        );
+      });
   }
 
   get endpoint() {

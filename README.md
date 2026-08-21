@@ -55,6 +55,9 @@ lamp after: [ 'on', '20', '2703', '2' ]
 
 **Reliability fixes**
 
+- Every HomeKit read of a lamp's `On` state went to the lamp over the LAN — one command out of the per-minute budget, and HomeKit blocked for the round trip. Reads are answered from the cache the announcements and property notifications already keep, with a refresh started behind the answer when it goes stale. A burst of reads used to queue up and leave the Home app spinning; the Homebridge log had 455 of them in a day.
+- The colour temperature range was advertised as 154–588 mired, but HomeKit defines the characteristic as 140–500. Adaptive Lighting computes its curve against exactly those bounds. HomeKit is now told 154–500; the lamp itself still goes wherever it always did.
+
 - Lamps were pinned to the address they were discovered at, so a new DHCP lease left one unreachable until Homebridge restarted. Announcements now update the endpoint — and the cached state, which costs nothing since the announcement already carries it.
 - A reply split across two TCP reads threw `JSON.parse` straight out of the data handler. The stream is now buffered by line.
 - Commands pending on a socket that closed were left to their own timeout instead of failing immediately.
@@ -171,6 +174,7 @@ How long, in milliseconds, the lamp takes to fade to a new value. Applies to the
 | `quota` | `55` | Commands per minute per lamp. The firmware allows 60 and hangs up when that is exceeded, so this leaves a margin. |
 | `coalesce` | `80` | Window, in ms, over which characteristic writes are merged into one command. Raising it merges more; lowering it makes the lamp react sooner. |
 | `keepAlive` | `30000` | TCP keep-alive interval, so a half-open socket is noticed instead of swallowing commands. |
+| `staleAfter` | `60000` | How old the cached power state may get before a HomeKit read starts a refresh behind it. The read itself is always answered from memory. |
 
 ### `devices`
 
