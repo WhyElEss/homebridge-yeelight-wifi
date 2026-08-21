@@ -200,6 +200,8 @@ An alert belongs to a lamp: it is configured on the lamp that gets it, and there
 
 `"alert": true` is shorthand for an alert switch in the default red.
 
+The colour fields appear only once the switch is ticked. Unticking it and ticking it again puts them back at their defaults: the settings form destroys a hidden field and rebuilds it from the schema, and a plugin's schema cannot ask it to do otherwise. Known, harmless, and only ever costs a value you had just typed.
+
 ### `multicast`
 
 Set `interface` to a specific address when the host has several and discovery binds to the wrong one.
