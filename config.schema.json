@@ -2,7 +2,7 @@
   "pluginAlias": "yeelight",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": "Lamps are discovered over SSDP, so nothing here is required — every field has a working default. Add a lamp under **Devices** only to name it or to make it behave differently from the rest; the id it answers to is printed in the log as `Received advertisement from 78cb4e`.",
+  "headerDisplay": "Lamps are discovered over SSDP, so nothing here is required — every field has a working default. Add a lamp under **Devices** to name it, or to give it an alert switch; the id it answers to is printed in the log as `Received advertisement from 78cb4e`.",
   "footerDisplay": "See the [README](https://github.com/WhyElEss/homebridge-yeelight-wifi#readme) for what each setting does and why the defaults are what they are.",
   "schema": {
     "type": "object",
@@ -12,34 +12,6 @@
         "type": "string",
         "default": "Yeelight",
         "required": true
-      },
-      "alert": {
-        "type": "object",
-        "properties": {
-          "enabled": {
-            "title": "Add an alert switch to every lamp",
-            "type": "boolean",
-            "default": false,
-            "description": "Gives every colour-capable lamp a second accessory — a plain switch named after it, like “Entrance Night Light Alert”. Switching it on takes that lamp to the colour below and remembers what it was doing; switching it off puts it back exactly, Adaptive Lighting included. A lamp listed under Devices can override any of this for itself."
-          },
-          "hue": {
-            "title": "Default Alert Hue (0-360)",
-            "type": "integer",
-            "default": 0,
-            "description": "0 red · 30 orange · 50 yellow · 120 green · 195 cyan · 240 blue · 280 purple · 320 pink"
-          },
-          "saturation": {
-            "title": "Default Alert Saturation (0-100)",
-            "type": "integer",
-            "default": 100,
-            "description": "100 is the pure colour; lower values wash it out towards white."
-          },
-          "brightness": {
-            "title": "Default Alert Brightness (1-100)",
-            "type": "integer",
-            "description": "Leave empty to keep whatever brightness the lamp already had, which is also one command less on the wire."
-          }
-        }
       },
       "transitions": {
         "type": "object",
@@ -199,22 +171,32 @@
                 "enabled": {
                   "title": "Alert switch for this lamp",
                   "type": "boolean",
-                  "description": "Overrides the platform setting: tick to give this lamp an alert switch even when the default is off, untick to leave this one lamp without one."
+                  "default": false,
+                  "description": "Adds a second accessory for this lamp — a plain switch named after it, like “Entrance Night Light Alert”. Switching it on takes the lamp to the colour below and remembers what it was doing; switching it off puts it back exactly, Adaptive Lighting included."
                 },
                 "hue": {
-                  "title": "Alert Hue for this lamp (0-360)",
+                  "title": "Alert Hue",
                   "type": "integer",
-                  "description": "Leave empty to use the default colour set above. 0 red · 30 orange · 50 yellow · 120 green · 195 cyan · 240 blue · 280 purple · 320 pink"
+                  "default": 0,
+                  "minimum": 0,
+                  "maximum": 360,
+                  "description": "0 red · 30 orange · 50 yellow · 120 green · 195 cyan · 240 blue · 280 purple · 320 pink"
                 },
                 "saturation": {
-                  "title": "Alert Saturation for this lamp (0-100)",
+                  "title": "Alert Saturation",
                   "type": "integer",
-                  "description": "Leave empty to use the default."
+                  "default": 100,
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "100 is the pure colour; lower washes it out towards white."
                 },
                 "brightness": {
-                  "title": "Alert Brightness for this lamp (1-100)",
+                  "title": "Alert Brightness",
                   "type": "integer",
-                  "description": "Leave empty to use the default, which is to keep whatever brightness the lamp already had."
+                  "default": 0,
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "0 keeps whatever brightness the lamp already had, which is also one command less on the wire."
                 }
               }
             }
@@ -226,34 +208,6 @@
   "layout": [
     "name",
     {
-      "type": "fieldset",
-      "title": "Alert switch — defaults for every lamp",
-      "expandable": true,
-      "expanded": true,
-      "items": [
-        "alert.enabled",
-        {
-          "key": "alert.hue",
-          "condition": {
-            "functionBody": "return model.alert && model.alert.enabled"
-          }
-        },
-        {
-          "key": "alert.saturation",
-          "condition": {
-            "functionBody": "return model.alert && model.alert.enabled"
-          }
-        },
-        {
-          "key": "alert.brightness",
-          "condition": {
-            "functionBody": "return model.alert && model.alert.enabled"
-          }
-        }
-      ],
-      "description": "What an alert does to a lamp, unless that lamp says otherwise under Devices."
-    },
-    {
       "key": "devices",
       "type": "array",
       "title": "Devices",
@@ -264,11 +218,26 @@
         "devices[].name",
         "devices[].hidden",
         "devices[].alert.enabled",
-        "devices[].alert.hue",
-        "devices[].alert.saturation",
-        "devices[].alert.brightness"
+        {
+          "key": "devices[].alert.hue",
+          "condition": {
+            "functionBody": "return !!(model.devices && model.devices[arrayIndices] && model.devices[arrayIndices].alert && model.devices[arrayIndices].alert.enabled);"
+          }
+        },
+        {
+          "key": "devices[].alert.saturation",
+          "condition": {
+            "functionBody": "return !!(model.devices && model.devices[arrayIndices] && model.devices[arrayIndices].alert && model.devices[arrayIndices].alert.enabled);"
+          }
+        },
+        {
+          "key": "devices[].alert.brightness",
+          "condition": {
+            "functionBody": "return !!(model.devices && model.devices[arrayIndices] && model.devices[arrayIndices].alert && model.devices[arrayIndices].alert.enabled);"
+          }
+        }
       ],
-      "description": "Settings for one lamp. Anything left empty here is inherited from the defaults above."
+      "description": "Settings for one lamp. A lamp that is not listed here still works, on the plugin's defaults."
     },
     {
       "type": "fieldset",

@@ -144,17 +144,11 @@ Full, with defaults shown:
       "multicast": {
         "interface": "0.0.0.0"
       },
-      "alert": {
-        "enabled": false,
-        "hue": 0,
-        "saturation": 100
-      },
       "devices": [
         {
           "id": "0x000000001778cb4e",
           "name": "Kitchen",
-          "blacklist": ["set_hsv"],
-          "alert": { "hue": 240 }
+          "alert": { "enabled": true, "hue": 240, "saturation": 100 }
         }
       ]
     }
@@ -185,7 +179,7 @@ Per-lamp settings. A lamp that is not listed still works, on the platform defaul
 - `name` — the name shown in HomeKit. Defaults to `<model>-<id>`.
 - `hidden` — `true` keeps the lamp out of HomeKit entirely.
 - `blacklist` — capabilities to keep out of HomeKit for this lamp. Edited in the JSON editor rather than the settings form, which has no widget that renders a list like this legibly. The values are the lamp's own method names, which the settings form shows under readable titles: `set_bright` brightness, `set_hsv` colour, `set_ct_abx` colour temperature (hiding it also removes Adaptive Lighting), `active_mode` moonlight mode, `bg_set_power` / `bg_set_bright` / `bg_set_hsv` the backlight.
-- `alert` — the same shape as the platform-level [`alert`](#alert) block, overriding it for this lamp; anything left out is inherited. `false` switches the alert off for this lamp alone, `true` switches it on with the platform's colour.
+- `alert` — gives this lamp an alert switch and sets its colour. See [`devices[].alert`](#devicesalert).
 
 A rename here is applied on every launch, not only when the accessory is first created.
 
@@ -193,16 +187,18 @@ A rename here is applied on every launch, not only when the accessory is first c
 
 The map this plugin used before `devices`, keyed the same three ways. Still read, and still supported, but `devices` takes precedence and is the one the Homebridge UI can render as a form.
 
-### `alert`
+### `devices[].alert`
 
-The default for every lamp; a lamp listed under [`devices`](#devices) can override any part of it for itself. Off by default. When enabled, every colour-capable lamp gets a second accessory named `<name> Alert` — a plain switch. See [Alert switch](#alert-switch-flash-and-restore-without-losing-adaptive-lighting).
+An alert belongs to a lamp: it is configured on the lamp that gets it, and there is no platform-wide default to inherit or to argue with. See [Alert switch](#alert-switch-flash-and-restore-without-losing-adaptive-lighting).
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `enabled` | `false` | Whether to expose the alert switch at all. |
+| `enabled` | `false` | Whether this lamp gets an alert switch. |
 | `hue` | `0` | Alert colour, 0–360. The default is red. |
 | `saturation` | `100` | Alert saturation, 0–100. |
-| `brightness` | unset | Alert brightness, 1–100. Left unset the lamp keeps the brightness it already had, which is also one command less on the wire. |
+| `brightness` | `0` | Alert brightness, 0–100. Zero keeps whatever brightness the lamp already had, which is also one command less on the wire. |
+
+`"alert": true` is shorthand for an alert switch in the default red.
 
 ### `multicast`
 
@@ -210,7 +206,7 @@ Set `interface` to a specific address when the host has several and discovery bi
 
 ## Alert switch: flash and restore without losing Adaptive Lighting
 
-With `alert.enabled`, each colour-capable lamp gains a `<name> Alert` switch, for automations like _"turn the lamp red while the front door is open, then put it back to whatever it was doing"_.
+A lamp configured with `alert.enabled` gains a second accessory, a switch named after it, for automations like _"turn the lamp red while the front door is open, then put it back to whatever it was doing"_.
 
 - Switching it **on** snapshots the lamp's power, colour, colour temperature and brightness, then takes it to the alert colour. A lamp that was off is lit by a single `set_scene`.
 - Switching it **off** puts the snapshot back: the colour or the colour temperature it was on, and off again if that is how it started. The colour is restored before the power, so a lamp that was off does not come back red the next time anything switches it on.
@@ -221,7 +217,9 @@ Two ordinary single-action automations in the Home app drive it — _door opens_
 
 While a lamp is flashing, Adaptive Lighting's background nudges are held back, so the alert colour is not washed out within the minute — but their values are still recorded, so the restore puts the lamp on the curve where it stands at that moment rather than where it was when the alert began.
 
-Cost on the wire: one command to flash, one to restore (two if the lamp was off, or if `brightness` is configured).
+Cost on the wire: one command to flash, one to restore — two if the lamp was off, or if an alert brightness is set.
+
+An `alert` block at the platform level, which earlier versions of this fork read as a default for every lamp, no longer does anything; the plugin says so in the log if it finds one.
 
 ## Tests
 

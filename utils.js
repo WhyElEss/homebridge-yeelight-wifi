@@ -57,26 +57,22 @@ const clamp = (value, min, max) => {
   return Math.min(Math.max(number, min), max);
 };
 
-// The platform-level alert block, overridden by the lamp's own. `false` and
-// `true` are shorthands for switching a single lamp off, or on with the
-// platform's colour.
-const resolveAlert = (config, entry) => {
-  const perDevice = entry.alert;
-  if (perDevice === false) return { enabled: false };
+// A lamp's own alert block, and nothing else: an alert is either configured on
+// a lamp or that lamp has none. `true` is a shorthand for switching one on with
+// the default red.
+const resolveAlert = (entry) => {
+  const alert = entry.alert === true ? { enabled: true } : entry.alert;
+  if (!alert || !alert.enabled) return { enabled: false };
 
-  const alert = Object.assign(
-    { enabled: false },
-    config && config.alert,
-    perDevice === true ? { enabled: true } : perDevice
-  );
-
-  if (!alert.enabled) return { enabled: false };
+  // Zero is how a slider says "leave the brightness where it is", which is also
+  // one command less on the wire.
+  const brightness = clamp(alert.brightness, 0, 100);
 
   return {
     enabled: true,
     hue: clamp(alert.hue, 0, 360) ?? 0,
     saturation: clamp(alert.saturation, 0, 100) ?? 100,
-    brightness: clamp(alert.brightness, 1, 100),
+    brightness: brightness || undefined,
   };
 };
 

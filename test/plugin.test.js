@@ -538,22 +538,47 @@ async function run() {
     const keys = ['bslamp3-78cb4e', '78cb4e', full];
 
     const byDevices = {
-      alert: { enabled: true, hue: 0, saturation: 100 },
       devices: [
-        { id: full, name: 'Main Bedroom', alert: { hue: 240 } },
-        { id: 'aaaaaa', name: 'Other' },
+        { id: full, name: 'Main Bedroom', alert: { enabled: true, hue: 240 } },
+        { id: 'aaaaaa', name: 'Other', alert: { enabled: true } },
       ],
     };
+    const alertFor = (config) => resolveAlert(deviceEntry(config, keys));
     check(
       'a lamp is found by its full id',
       getName(byDevices, keys) === 'Main Bedroom',
       getName(byDevices, keys)
     );
     check(
-      'per-lamp colour overrides the platform, the rest is inherited',
-      JSON.stringify(resolveAlert(byDevices, deviceEntry(byDevices, keys))) ===
+      'the lamp keeps its own colour, the rest falls back to red',
+      JSON.stringify(alertFor(byDevices)) ===
         JSON.stringify({ enabled: true, hue: 240, saturation: 100 }),
-      JSON.stringify(resolveAlert(byDevices, deviceEntry(byDevices, keys)))
+      JSON.stringify(alertFor(byDevices))
+    );
+    check(
+      'a lamp with no alert block has no alert',
+      resolveAlert({ name: 'Plain' }).enabled === false,
+      ''
+    );
+    check(
+      'a platform-wide alert block is ignored',
+      resolveAlert(deviceEntry({ alert: { enabled: true } }, keys)).enabled ===
+        false,
+      ''
+    );
+    check(
+      'brightness 0 means leave it alone',
+      alertFor({
+        devices: [{ id: full, alert: { enabled: true, brightness: 0 } }],
+      }).brightness === undefined,
+      ''
+    );
+    check(
+      'a real brightness survives',
+      alertFor({
+        devices: [{ id: full, alert: { enabled: true, brightness: 40 } }],
+      }).brightness === 40,
+      ''
     );
 
     const shortKey = { devices: [{ id: '78cb4e', name: 'Short' }] };
@@ -566,8 +591,7 @@ async function run() {
     );
 
     const legacy = {
-      alert: { enabled: true },
-      defaultValue: { '78cb4e': { name: 'Legacy', alert: false } },
+      defaultValue: { '78cb4e': { name: 'Legacy', alert: true } },
     };
     check(
       'defaultValue still works',
@@ -575,9 +599,10 @@ async function run() {
       getName(legacy, keys)
     );
     check(
-      'a lamp can opt out of the alert',
-      resolveAlert(legacy, deviceEntry(legacy, keys)).enabled === false,
-      JSON.stringify(resolveAlert(legacy, deviceEntry(legacy, keys)))
+      'alert: true is the shorthand for the default red',
+      JSON.stringify(resolveAlert(deviceEntry(legacy, keys))) ===
+        JSON.stringify({ enabled: true, hue: 0, saturation: 100 }),
+      JSON.stringify(resolveAlert(deviceEntry(legacy, keys)))
     );
 
     const both = {
@@ -607,26 +632,19 @@ async function run() {
       ) === '["set_hsv"]',
       ''
     );
+    const clamped = resolveAlert({
+      alert: { enabled: true, hue: 999, saturation: -5, brightness: 200 },
+    });
     check(
       'out-of-range values are clamped',
-      JSON.stringify(
-        resolveAlert(
-          { alert: { enabled: true, hue: 999, saturation: -5, brightness: 0 } },
-          {}
-        )
-      ) ===
+      JSON.stringify(clamped) ===
         JSON.stringify({
           enabled: true,
           hue: 360,
           saturation: 0,
-          brightness: 1,
+          brightness: 100,
         }),
-      JSON.stringify(
-        resolveAlert(
-          { alert: { enabled: true, hue: 999, saturation: -5, brightness: 0 } },
-          {}
-        )
-      )
+      JSON.stringify(clamped)
     );
   }
 

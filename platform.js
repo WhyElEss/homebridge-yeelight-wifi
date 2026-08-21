@@ -56,6 +56,14 @@ class YeePlatform {
       }
     });
 
+    if (config && config.alert) {
+      log.warn(
+        'The platform-level `alert` block no longer does anything. Move it into ' +
+          'the lamp it belongs to, under `devices`, or configure the alert from ' +
+          "the plugin's settings page."
+      );
+    }
+
     this.api = api;
     this.api.on('didFinishLaunching', async () => {
       this.sock.on('message', this.handleMessage.bind(this));
@@ -263,9 +271,10 @@ class YeePlatform {
     return bulb;
   }
 
-  // The platform's alert block, overridden by the lamp's own entry.
+  // A lamp's own alert block. There is no platform-wide default: an alert
+  // belongs to a lamp or it does not exist.
   alertFor(keys, features, name) {
-    const alert = resolveAlert(this.config, deviceEntry(this.config, keys));
+    const alert = resolveAlert(deviceEntry(this.config, keys));
     if (!alert.enabled) return alert;
 
     // An alert is a colour, so a lamp that cannot take one has nothing to show.
