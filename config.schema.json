@@ -199,6 +199,19 @@
                   "description": "0 keeps whatever brightness the lamp already had, which is also one command less on the wire."
                 }
               }
+            },
+            "powerOn": {
+              "type": "object",
+              "properties": {
+                "brightness": {
+                  "title": "Brightness when switched on by hand",
+                  "type": "integer",
+                  "default": 0,
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "Switching this lamp on without saying anything else — the Home app, a widget, Siri — brings it up at this brightness. 0 leaves it wherever it was left. A lamp running Adaptive Lighting also comes up at the transition's current colour temperature, in the same single command. A scene that carries its own brightness or colour is left alone."
+                }
+              }
             }
           }
         }
@@ -217,6 +230,7 @@
         "devices[].id",
         "devices[].name",
         "devices[].hidden",
+        "devices[].powerOn.brightness",
         "devices[].alert.enabled",
         {
           "key": "devices[].alert.hue",

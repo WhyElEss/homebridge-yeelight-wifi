@@ -128,16 +128,12 @@ const Temperature = (Device) =>
         this.service
       );
       this.accessory.configureController(this.controller);
-
-      this.service
-        .getCharacteristic(global.Characteristic.On)
-        .on('change', ({ newValue, oldValue, reason }) => {
-          if (reason !== 'write') return;
-          if (!this.adaptiveLighting) return;
-          if (!oldValue && newValue) {
-            this.setTemperature(this._temperature--);
-          }
-        });
+      // Waking a lamp at the transition's current temperature is handled by
+      // applyPowerOnDefaults, in the same command that switches it on. This
+      // used to be a second command sent from here, with the temperature
+      // decremented by one mired each time to get past setTemperature's
+      // "same value, skip" check - a lamp that was switched on often drifted
+      // measurably away from the curve.
     }
   };
 

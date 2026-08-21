@@ -148,6 +148,7 @@ Full, with defaults shown:
         {
           "id": "0x000000001778cb4e",
           "name": "Kitchen",
+          "powerOn": { "brightness": 100 },
           "alert": { "enabled": true, "hue": 240, "saturation": 100 }
         }
       ]
@@ -179,6 +180,7 @@ Per-lamp settings. A lamp that is not listed still works, on the platform defaul
 - `name` — the name shown in HomeKit. Defaults to `<model>-<id>`.
 - `hidden` — `true` keeps the lamp out of HomeKit entirely.
 - `blacklist` — capabilities to keep out of HomeKit for this lamp. Edited in the JSON editor rather than the settings form, which has no widget that renders a list like this legibly. The values are the lamp's own method names, which the settings form shows under readable titles: `set_bright` brightness, `set_hsv` colour, `set_ct_abx` colour temperature (hiding it also removes Adaptive Lighting), `active_mode` moonlight mode, `bg_set_power` / `bg_set_bright` / `bg_set_hsv` the backlight.
+- `powerOn.brightness` — the brightness this lamp wakes at when it is switched on by hand. See [Waking a lamp](#waking-a-lamp).
 - `alert` — gives this lamp an alert switch and sets its colour. See [`devices[].alert`](#devicesalert).
 
 A rename here is applied on every launch, not only when the accessory is first created.
@@ -205,6 +207,19 @@ The colour fields appear only once the switch is ticked. Unticking it and tickin
 ### `multicast`
 
 Set `interface` to a specific address when the host has several and discovery binds to the wrong one.
+
+## Waking a lamp
+
+Switching a lamp on without saying anything else — a tap in the Home app, an iOS widget, Siri, a scene that only writes `On` — sends a bare power-on, and the lamp comes back exactly where it was left. After an evening at 10 % in a warm colour, that is not what anyone means by "on".
+
+Two things happen on a bare power-on:
+
+- **Brightness.** `powerOn.brightness` on the lamp is what it wakes at. Zero, the default, leaves it wherever it was left.
+- **Adaptive Lighting.** A lamp with a running transition wakes at the transition's _current_ colour temperature, not the one it was switched off at.
+
+Both ride along in the single `set_scene` that switches the lamp on, so waking a lamp still costs one command. Earlier versions put the temperature back in a second command sent after the power, with the value decremented by one mired each time to get past the "same value, skip" check — a lamp that was switched on often drifted measurably away from the curve.
+
+This applies only when nothing else arrives in the same coalescing window. A scene that carries its own brightness or colour is left alone.
 
 ## Alert switch: flash and restore without losing Adaptive Lighting
 

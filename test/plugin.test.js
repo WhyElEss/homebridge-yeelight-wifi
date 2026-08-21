@@ -648,6 +648,97 @@ async function run() {
     );
   }
 
+  // ---------------------------------------------------------------- 19
+  console.log('\n19. A bare power-on wakes the lamp the way it was told to');
+  {
+    const armed = (bulb) => {
+      bulb.controller = { isAdaptiveLightingActive: () => true };
+      return bulb;
+    };
+
+    // a. brightness plus the Adaptive Lighting curve, in one command
+    let lamp = new FakeLamp();
+    await lamp.listen();
+    let made = await makeBulb(lamp, {}, { powerOn: { brightness: 100 } });
+    armed(made.bulb);
+    await scene(made.service, { On: true });
+    await sleep(200);
+    let m = lamp.methods();
+    check('one command', m.length === 1, `${m.length}: ${m}`);
+    check('it is a scene', m[0] === 'set_scene', `${m}`);
+    check(
+      'carries the curve temperature and the configured brightness',
+      JSON.stringify(lamp.received[0].params) ===
+        JSON.stringify(['ct', 2703, 100]),
+      JSON.stringify(lamp.received[0].params)
+    );
+    await lamp.close();
+
+    // b. a scene brings its own brightness, which must win
+    lamp = new FakeLamp();
+    await lamp.listen();
+    made = await makeBulb(lamp, {}, { powerOn: { brightness: 100 } });
+    armed(made.bulb);
+    await scene(made.service, { On: true, Brightness: 40 });
+    await sleep(200);
+    check(
+      "the scene's own brightness is left alone",
+      JSON.stringify(lamp.received[0].params) ===
+        JSON.stringify(['ct', 2703, 40]),
+      JSON.stringify(lamp.received[0].params)
+    );
+    await lamp.close();
+
+    // c. a lamp that is already lit is not reset by a redundant On
+    lamp = new FakeLamp();
+    await lamp.listen();
+    made = await makeBulb(
+      lamp,
+      {},
+      { power: 'on', powerOn: { brightness: 100 } }
+    );
+    armed(made.bulb);
+    await scene(made.service, { On: true });
+    await sleep(200);
+    m = lamp.methods();
+    check(
+      'a redundant On stays a plain set_power',
+      m.length === 1 && m[0] === 'set_power',
+      `${m}`
+    );
+    await lamp.close();
+
+    // d. no brightness configured: the curve alone still comes back
+    lamp = new FakeLamp();
+    await lamp.listen();
+    made = await makeBulb(lamp, {}, {});
+    armed(made.bulb);
+    await scene(made.service, { On: true });
+    await sleep(200);
+    check(
+      'Adaptive Lighting wakes the lamp on the curve, in one command',
+      lamp.methods().length === 1 &&
+        JSON.stringify(lamp.received[0].params) ===
+          JSON.stringify(['ct', 2703, 50]),
+      JSON.stringify(lamp.received.map((r) => [r.method, r.params]))
+    );
+    await lamp.close();
+
+    // e. nothing configured, no Adaptive Lighting: unchanged behaviour
+    lamp = new FakeLamp();
+    await lamp.listen();
+    made = await makeBulb(lamp, {}, {});
+    await scene(made.service, { On: true });
+    await sleep(200);
+    m = lamp.methods();
+    check(
+      'a plain lamp still just gets set_power',
+      m.length === 1 && m[0] === 'set_power',
+      `${m}`
+    );
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }

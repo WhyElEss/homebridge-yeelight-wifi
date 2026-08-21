@@ -57,6 +57,13 @@ const clamp = (value, min, max) => {
   return Math.min(Math.max(number, min), max);
 };
 
+// What a bare "on" from HomeKit should mean for this lamp. Zero brightness,
+// the default, leaves the lamp waking wherever it was left.
+const resolvePowerOn = (entry) => {
+  const powerOn = entry.powerOn || {};
+  return { brightness: clamp(powerOn.brightness, 0, 100) || undefined };
+};
+
 // A lamp's own alert block, and nothing else: an alert is either configured on
 // a lamp or that lamp has none. `true` is a shorthand for switching one on with
 // the default red.
@@ -507,6 +514,7 @@ module.exports = {
   blacklist,
   deviceEntry,
   resolveAlert,
+  resolvePowerOn,
   handle,
   sleep,
   pipe,

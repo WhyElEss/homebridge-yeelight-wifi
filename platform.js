@@ -16,6 +16,7 @@ const {
   blacklist,
   deviceEntry,
   resolveAlert,
+  resolvePowerOn,
   sleep,
   pipe,
 } = require('./utils');
@@ -252,6 +253,7 @@ class YeePlatform {
     }
 
     const alert = this.alertFor(keys, features, name);
+    const powerOn = resolvePowerOn(deviceEntry(this.config, keys));
 
     // Applied last so its setTemperature override wraps the temperature
     // mixin's, which is what lets it swallow background Adaptive Lighting
@@ -263,7 +265,7 @@ class YeePlatform {
 
     const Bulb = class extends pipe(...mixins)(YeeBulb) {};
     const bulb = new Bulb(
-      { id, model, endpoint, accessory, limits, alert, ...props },
+      { id, model, endpoint, accessory, limits, alert, powerOn, ...props },
       this
     );
     this.bulbs[id] = bulb;

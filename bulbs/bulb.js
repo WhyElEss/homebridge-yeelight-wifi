@@ -52,6 +52,9 @@ class YeeBulb {
     // The advertisement we were built from already carries the live state.
     this.power = props.power;
 
+    // What a bare "on" means for this lamp - see applyPowerOnDefaults.
+    this.powerOn = props.powerOn || {};
+
     this.accessory
       .getService(global.Service.AccessoryInformation)
       .setCharacteristic(global.Characteristic.Manufacturer, 'YeeLight')
@@ -493,6 +496,8 @@ class YeeBulb {
       ];
     }
 
+    desired = this.applyPowerOnDefaults(desired);
+
     const wantsOn = desired.power === true;
     const hasColor = desired.hue !== undefined || desired.sat !== undefined;
     const hasTemperature = desired.ct !== undefined;
@@ -570,6 +575,42 @@ class YeeBulb {
     }
 
     return steps;
+  }
+
+  // Someone flicking a lamp on - from the Home app, a widget, Siri - sends a
+  // bare "on" and nothing else, and the lamp comes back wherever it was left,
+  // which after an evening at 10% is not what anyone means by "on". A lamp can
+  // be given a brightness to wake at, and a lamp running Adaptive Lighting
+  // wakes at the transition's current temperature rather than the one it was
+  // switched off at.
+  //
+  // Decided here, at flush time, rather than in setPower: by now the
+  // coalescing window has closed, so a scene that carries its own brightness
+  // or colour has already landed in the same patch and is left alone.
+  applyPowerOnDefaults(desired) {
+    if (desired.power !== true || this.power) return desired;
+    if (
+      desired.bright !== undefined ||
+      desired.hue !== undefined ||
+      desired.sat !== undefined ||
+      desired.ct !== undefined
+    ) {
+      return desired;
+    }
+
+    const patch = {};
+    const { brightness } = this.powerOn;
+    if (Number.isFinite(brightness) && brightness > 0)
+      patch.bright = brightness;
+    if (this.adaptiveLighting && Number.isFinite(this.temperature)) {
+      patch.ct = this.temperature;
+    }
+    if (!Object.keys(patch).length) return desired;
+
+    this.log.debug(
+      `${this.tag}: waking with ${JSON.stringify(patch)} on a bare power-on.`
+    );
+    return Object.assign({}, desired, patch);
   }
 
   // set_scene turns the lamp on and applies colour plus brightness atomically.
