@@ -907,6 +907,40 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 24
+  console.log('\n24. A lamp rebuilt from the cache asks what state it is in');
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    // As if restored after a restart: the cache said on at 50, the lamp has
+    // since been switched off at the wall.
+    const { bulb, service } = await makeBulb(lamp, {}, { power: 'on' });
+    lamp.reply = null;
+    const original = bulb.getProperty.bind(bulb);
+    bulb.getProperty = (props) =>
+      original(props).then(() => ['off', '30', '370', '10', '20', '2']);
+
+    await bulb.refreshState();
+    await sleep(100);
+    check(
+      'one command, and it is a get_prop',
+      lamp.methods().length === 1 && lamp.methods()[0] === 'get_prop',
+      `${lamp.methods()}`
+    );
+    check('power corrected', bulb.power === false, `${bulb.power}`);
+    check('brightness corrected', bulb.bright === 30, `${bulb.bright}`);
+    check(
+      'HomeKit was told as well',
+      service.getCharacteristic('On').value === false &&
+        service.getCharacteristic('Brightness').value === 30,
+      `${service.getCharacteristic('On').value} ${
+        service.getCharacteristic('Brightness').value
+      }`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }

@@ -454,6 +454,26 @@ class YeeBulb {
     return this.enqueue({ method: 'get_prop', params: properties });
   }
 
+  // One command that replaces everything we think we know. Used when a lamp is
+  // rebuilt from the accessory cache rather than from an announcement, where
+  // the starting state is however the lamp was last seen - possibly yesterday.
+  refreshState() {
+    const props = ['power', 'bright', 'ct', 'hue', 'sat', 'color_mode'];
+    return this.getProperty(props)
+      .then((values) => {
+        props.forEach((prop, i) => {
+          const value = values[i];
+          if (value === undefined || value === '') return;
+          this.updateStateFromProp(prop, value);
+        });
+      })
+      .catch((err) => {
+        this.log.warn(
+          `${this.tag}: could not read the lamp's state: ${err.message || err}.`
+        );
+      });
+  }
+
   identify() {
     // Use flash notify effect when supported
     // TODO: Check support for `start_cf`

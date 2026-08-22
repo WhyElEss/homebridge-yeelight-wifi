@@ -68,6 +68,7 @@ class YeePlatform {
     this.api = api;
     this.api.on('didFinishLaunching', async () => {
       this.sock.on('message', this.handleMessage.bind(this));
+      this.reviveKnownDevices();
       log(`Searching for known devices...`);
 
       let round = 0;
@@ -95,6 +96,54 @@ class YeePlatform {
         log(`All known devices found. Stopping proactive search.`);
       }
     });
+  }
+
+  // A lamp used to come into being only when its announcement arrived, and one
+  // of these lamps answers no search at all - so after a restart its accessory
+  // sat in HomeKit with nothing behind it: writes were accepted and dropped on
+  // the floor, reads returned whatever was in the cache. Everything needed to
+  // rebuild it was already saved from last time, so it is rebuilt at once and
+  // then asked what state it is actually in.
+  reviveKnownDevices() {
+    Object.values(this.devices).forEach((accessory) => {
+      const { did, endpoint, support } = accessory.context;
+      if (!did || !endpoint || !support) return;
+
+      const bulb = this.buildDevice(endpoint, {
+        id: did,
+        model: accessory.context.model,
+        support,
+        ...this.rememberedState(accessory),
+      });
+      if (bulb) bulb.refreshState();
+    });
+  }
+
+  // The last values HomeKit was told, which Homebridge has already persisted
+  // with the accessory. Good enough to start from, and corrected a moment
+  // later by the lamp itself.
+  rememberedState(accessory) {
+    const service = accessory.getService(global.Service.Lightbulb);
+    if (!service) return {};
+
+    const { Characteristic } = global;
+    const value = (characteristic) => {
+      if (!service.testCharacteristic(characteristic)) return undefined;
+      return service.getCharacteristic(characteristic).value;
+    };
+
+    const state = {
+      power: value(Characteristic.On) ? 'on' : 'off',
+      bright: value(Characteristic.Brightness),
+      ct: value(Characteristic.ColorTemperature),
+      hue: value(Characteristic.Hue),
+      sat: value(Characteristic.Saturation),
+    };
+
+    Object.keys(state).forEach((key) => {
+      if (state[key] === undefined || state[key] === null) delete state[key];
+    });
+    return state;
   }
 
   configureAccessory(accessory) {
@@ -200,6 +249,19 @@ class YeePlatform {
       this.api.registerPlatformAccessories('homebridge-yeelight', 'yeelight', [
         accessory,
       ]);
+    }
+
+    // Kept so the next launch can rebuild this lamp without waiting to be told
+    // it exists. The endpoint may be stale by then; an announcement relocates
+    // it, and until one arrives a stale address fails loudly instead of
+    // silently swallowing everything HomeKit sends.
+    if (
+      accessory.context.endpoint !== endpoint ||
+      accessory.context.support !== support
+    ) {
+      accessory.context.endpoint = endpoint;
+      accessory.context.support = support;
+      this.api.updatePlatformAccessories([accessory]);
     }
 
     // A name from the config only ever reached a freshly created accessory, so
