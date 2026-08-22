@@ -64,13 +64,11 @@ function configure(platform, bulb, { id, name }) {
   characteristic.removeAllListeners?.('set');
   characteristic.removeAllListeners?.('get');
   characteristic
-    .on('set', async (value, callback) => {
-      try {
-        await bulb.setAlert(!!value);
-        callback(null);
-      } catch (err) {
-        callback(err);
-      }
+    .on('set', (value, callback) => {
+      // Same rule as the lamp's own handlers: accept now, act after. An alert
+      // is two flushes on a lamp that was off, which HomeKit should not wait on.
+      bulb.accepted(bulb.setAlert(!!value), () => bulb.publishAlertState());
+      callback(null);
     })
     // Answered from memory: the alert is our own state, and asking the lamp
     // would spend a command out of its per-minute quota for nothing.

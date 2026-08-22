@@ -8,13 +8,13 @@ const Brightness = (Device) =>
         this.service.getCharacteristic(global.Characteristic.Brightness) ||
         this.service.addCharacteristic(global.Characteristic.Brightness)
       )
-        .on('set', async (value, callback) => {
-          try {
-            await this.setBrightness(value);
-            callback(null);
-          } catch (err) {
-            callback(err);
-          }
+        .on('set', (value, callback) => {
+          this.accepted(this.setBrightness(value), () =>
+            this.service
+              .getCharacteristic(global.Characteristic.Brightness)
+              .updateValue(this.bright)
+          );
+          callback(null);
         })
         .updateValue(this.bright);
     }

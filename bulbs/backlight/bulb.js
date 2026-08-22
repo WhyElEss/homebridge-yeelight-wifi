@@ -11,13 +11,13 @@ const Backlight = (Device) =>
 
       this.backlightService
         .getCharacteristic(global.Characteristic.On)
-        .on('set', async (value, callback) => {
-          try {
-            await this.setBacklightPower(value);
-            callback(null);
-          } catch (err) {
-            callback(err);
-          }
+        .on('set', (value, callback) => {
+          this.accepted(this.setBacklightPower(value), () =>
+            this.backlightService
+              .getCharacteristic(global.Characteristic.On)
+              .updateValue(this.backlightPower)
+          );
+          callback(null);
         })
         .on('get', async (callback) => {
           try {

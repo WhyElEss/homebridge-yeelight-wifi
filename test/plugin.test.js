@@ -84,7 +84,9 @@ async function run() {
       ColorTemperature: 370,
     }).catch(() => {});
     const elapsed = Date.now() - started;
-    await sleep(100);
+    // The handler answers HomeKit at once now, so the retry ladder runs after
+    // the write has already been accepted - wait it out before counting.
+    await sleep(1500);
     const m = lamp.methods();
     const scenes = m.filter((x) => x === 'set_scene');
     console.log(
@@ -97,7 +99,7 @@ async function run() {
       scenes.length <= 2,
       `${scenes.length}`
     );
-    check('gives up quickly', elapsed < 2000, `${elapsed}ms`);
+    check('HomeKit was never made to wait', elapsed < 50, `${elapsed}ms`);
     check(
       'retry used a fresh connection',
       lamp.connections >= 2,
@@ -829,6 +831,55 @@ async function run() {
       'the warm end is left alone',
       props.minValue === 154,
       JSON.stringify(props)
+    );
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 22
+  console.log('\n22. Writes are accepted at once, not when the lamp answers');
+  {
+    const lamp = new FakeLamp({ delay: 600 });
+    await lamp.listen();
+    const { service } = await makeBulb(lamp, {}, { power: 'on' });
+
+    const started = Date.now();
+    await service.getCharacteristic('Brightness').write(40);
+    const elapsed = Date.now() - started;
+    check('the handler returned immediately', elapsed < 50, `${elapsed}ms`);
+    check(
+      'nothing on the wire yet',
+      lamp.methods().length === 0,
+      `${lamp.methods()}`
+    );
+    await sleep(900);
+    check(
+      'and the command still went out',
+      lamp.methods().length === 1 && lamp.methods()[0] === 'set_bright',
+      `${lamp.methods()}`
+    );
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 23
+  console.log('\n23. A command the lamp never takes puts HomeKit back');
+  {
+    const lamp = new FakeLamp({ silent: true });
+    await lamp.listen();
+    const { service } = await makeBulb(lamp, {
+      connection: { timeout: 200, retries: 0 },
+    });
+    service.getCharacteristic('On').updateValue(false);
+    await service.getCharacteristic('On').write(true);
+    check(
+      'HomeKit was told yes straight away',
+      service.getCharacteristic('On').value === true,
+      `${service.getCharacteristic('On').value}`
+    );
+    await sleep(1200);
+    check(
+      'and corrected once the lamp never answered',
+      service.getCharacteristic('On').value === false,
+      `${service.getCharacteristic('On').value}`
     );
     await lamp.close();
   }

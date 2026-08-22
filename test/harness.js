@@ -37,7 +37,13 @@ class FakeCharacteristic {
     return new Promise((resolve, reject) => {
       this.handlers.set(
         value,
-        (err) => (err ? reject(err) : resolve()),
+        (err) => {
+          if (err) return reject(err);
+          // HAP-NodeJS stores the written value once the handler accepts it,
+          // which is what makes a later updateValue visible as a correction.
+          this.value = value;
+          resolve();
+        },
         context
       );
     });

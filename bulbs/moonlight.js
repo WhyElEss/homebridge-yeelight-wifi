@@ -25,13 +25,13 @@ const MoonlightMode = (Device) =>
 
       this.moonlightModeService
         .getCharacteristic(global.Characteristic.On)
-        .on('set', async (value, callback) => {
-          try {
-            await this.setMoonlightMode(value);
-            callback(null);
-          } catch (err) {
-            callback(err);
-          }
+        .on('set', (value, callback) => {
+          this.accepted(this.setMoonlightMode(value), () =>
+            this.moonlightModeService
+              .getCharacteristic(global.Characteristic.On)
+              .updateValue(this.activeMode === MOONLIGHT_MODE)
+          );
+          callback(null);
         })
         .on('get', async (callback) => {
           try {

@@ -32,7 +32,7 @@ const Temperature = (Device) =>
         // it, which is the only way to tell a background nudge from a
         // deliberate change - see the alert mixin, which suppresses the
         // former while a lamp is flashing.
-        .on('set', async (value, callback, context) => {
+        .on('set', (value, callback, context) => {
           const fromAdaptiveLighting =
             typeof context === 'object' &&
             context !== null &&
@@ -49,12 +49,12 @@ const Temperature = (Device) =>
             return;
           }
 
-          try {
-            await this.setTemperature(value, fromAdaptiveLighting);
-            callback(null);
-          } catch (err) {
-            callback(err);
-          }
+          this.accepted(this.setTemperature(value, fromAdaptiveLighting), () =>
+            this.service
+              .getCharacteristic(ColorTemperature)
+              .updateValue(this.temperature)
+          );
+          callback(null);
         })
         .setProps({ minValue, maxValue })
         .updateValue(this.temperature);

@@ -14,13 +14,13 @@ const BacklightColor = (Device) =>
         this.backlightService.getCharacteristic(Hue) ||
         this.backlightService.addCharacteristic(Hue)
       )
-        .on('set', async (value, callback) => {
-          try {
-            await this.setBacklightColor(value, null);
-            callback(null);
-          } catch (err) {
-            callback(err);
-          }
+        .on('set', (value, callback) => {
+          this.accepted(this.setBacklightColor(value, null), () =>
+            this.backlightService
+              .getCharacteristic(Hue)
+              .updateValue(this.backlightHue)
+          );
+          callback(null);
         })
         .updateValue(this.backlightHue);
 
@@ -28,13 +28,13 @@ const BacklightColor = (Device) =>
         this.backlightService.getCharacteristic(Saturation) ||
         this.backlightService.addCharacteristic(Saturation)
       )
-        .on('set', async (value, callback) => {
-          try {
-            await this.setBacklightColor(null, value);
-            callback(null);
-          } catch (err) {
-            callback(err);
-          }
+        .on('set', (value, callback) => {
+          this.accepted(this.setBacklightColor(null, value), () =>
+            this.backlightService
+              .getCharacteristic(Saturation)
+              .updateValue(this.backlightSat)
+          );
+          callback(null);
         })
         .updateValue(this.backlightSat);
     }

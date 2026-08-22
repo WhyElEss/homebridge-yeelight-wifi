@@ -11,13 +11,11 @@ const Color = (Device) =>
         this.service.getCharacteristic(Hue) ||
         this.service.addCharacteristic(Hue)
       )
-        .on('set', async (value, callback) => {
-          try {
-            await this.setColor(value, null);
-            callback(null);
-          } catch (err) {
-            callback(err);
-          }
+        .on('set', (value, callback) => {
+          this.accepted(this.setColor(value, null), () =>
+            this.service.getCharacteristic(Hue).updateValue(this.hue)
+          );
+          callback(null);
         })
         .updateValue(this.hue);
 
@@ -25,13 +23,11 @@ const Color = (Device) =>
         this.service.getCharacteristic(Saturation) ||
         this.service.addCharacteristic(Saturation)
       )
-        .on('set', async (value, callback) => {
-          try {
-            await this.setColor(null, value);
-            callback(null);
-          } catch (err) {
-            callback(err);
-          }
+        .on('set', (value, callback) => {
+          this.accepted(this.setColor(null, value), () =>
+            this.service.getCharacteristic(Saturation).updateValue(this.sat)
+          );
+          callback(null);
         })
         .updateValue(this.sat);
     }

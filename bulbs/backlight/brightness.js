@@ -10,13 +10,13 @@ const BacklightBrightness = (Device) =>
         this.backlightService.getCharacteristic(Brightness) ||
         this.backlightService.addCharacteristic(Brightness)
       )
-        .on('set', async (value, callback) => {
-          try {
-            await this.setBacklightBrightness(value);
-            callback(null);
-          } catch (err) {
-            callback(err);
-          }
+        .on('set', (value, callback) => {
+          this.accepted(this.setBacklightBrightness(value), () =>
+            this.backlightService
+              .getCharacteristic(global.Characteristic.Brightness)
+              .updateValue(this.backlightBright)
+          );
+          callback(null);
         })
         .updateValue(this.backlightBright);
     }

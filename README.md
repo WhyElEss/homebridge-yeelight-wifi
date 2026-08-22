@@ -55,6 +55,7 @@ lamp after: [ 'on', '20', '2703', '2' ]
 
 **Reliability fixes**
 
+- Every write waited for the lamp to answer before telling HomeKit the write had been accepted — 105–170 ms against the 6–8 ms of a plugin that answers first and acts after. Homebridge's guidance is explicit: _return the callback instantly, and call `updateValue` once the action has completed_; a handler that thinks for too long is warned about at three seconds and abandoned at nine, and a colour wheel streams writes far faster than a lamp on Wi-Fi can answer. Handlers now accept the write, queue the command, and push the cached value back if it never lands.
 - Every HomeKit read of a lamp's `On` state went to the lamp over the LAN — one command out of the per-minute budget, and HomeKit blocked for the round trip. Reads are answered from the cache the announcements and property notifications already keep, with a refresh started behind the answer when it goes stale. A burst of reads used to queue up and leave the Home app spinning; the Homebridge log had 455 of them in a day.
 - The colour temperature range was advertised as 154–588 mired, but HomeKit defines the characteristic as 140–500. Adaptive Lighting computes its curve against exactly those bounds. HomeKit is now told 154–500; the lamp itself still goes wherever it always did.
 

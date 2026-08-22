@@ -81,13 +81,13 @@ class YeeBulb {
 
     this.service
       .getCharacteristic(global.Characteristic.On)
-      .on('set', async (value, callback) => {
-        try {
-          await this.setPower(value);
-          callback(null);
-        } catch (err) {
-          callback(err);
-        }
+      .on('set', (value, callback) => {
+        this.accepted(this.setPower(value), () =>
+          this.service
+            .getCharacteristic(global.Characteristic.On)
+            .updateValue(this.power)
+        );
+        callback(null);
       })
       // Answered from memory, never from the lamp. HomeKit reads this often -
       // opening the accessory, building a widget, configuring Adaptive
@@ -110,6 +110,24 @@ class YeeBulb {
 
   get tag() {
     return `${this.name} (${this.host})`;
+  }
+
+  // HomeKit is told a write was accepted as soon as it is queued, rather than
+  // when the lamp confirms it. Homebridge's own guidance is to "return the
+  // callback() instantly, and call updateValue once the action has completed":
+  // a handler that thinks for too long gets a warning at three seconds and is
+  // abandoned at nine, and a colour wheel streams writes far faster than a
+  // lamp on Wi-Fi can answer. If the command never lands, the cached value is
+  // pushed back so the tile stops showing something that never happened.
+  accepted(promise, revert) {
+    promise.catch((err) => {
+      this.log.warn(
+        `${this.tag}: ${
+          err.message || err
+        } - putting HomeKit back to the lamp's state.`
+      );
+      if (revert) revert();
+    });
   }
 
   // At most one refresh a minute, and never one that HomeKit waits on.
