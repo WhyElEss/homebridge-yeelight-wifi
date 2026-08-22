@@ -5,6 +5,7 @@ const MoonlightMode = (Device) =>
   class extends Device {
     constructor(props, platform) {
       super(props, platform);
+      this.lastMoonlightRead = 0;
       this.initMoonlight().catch((err) => {
         this.log.debug(
           `${this.tag}: moonlight probe failed: ${err.message || err}.`
@@ -33,16 +34,31 @@ const MoonlightMode = (Device) =>
           );
           callback(null);
         })
-        .on('get', async (callback) => {
-          try {
-            const [value] = await this.getProperty(['active_mode']);
-            this.activeMode = Number(value);
-            callback(null, this.activeMode);
-          } catch (err) {
-            callback(err, this.activeMode);
-          }
+        // From memory, like every other read: a read that goes to the lamp
+        // costs a command and blocks HomeKit while it travels.
+        .on('get', (callback) => {
+          callback(null, this.activeMode === MOONLIGHT_MODE);
+          this.refreshMoonlightInBackground();
         })
         .updateValue(this.activeMode);
+    }
+
+    refreshMoonlightInBackground() {
+      const now = Date.now();
+      if (now - this.lastMoonlightRead < this.staleAfter) return;
+      this.lastMoonlightRead = now;
+      this.getProperty(['active_mode'])
+        .then(([value]) => {
+          if (value === undefined || value === '') return;
+          this.updateStateFromProp('active_mode', value);
+        })
+        .catch((err) => {
+          this.log.debug(
+            `${this.tag}: background moonlight refresh failed: ${
+              err.message || err
+            }.`
+          );
+        });
     }
 
     async setMoonlightMode(state) {

@@ -234,7 +234,7 @@ async function makeBulb(lamp, config = {}, props = {}) {
   // Let the moonlight probe finish so it does not pollute the counters.
   await new Promise((r) => setTimeout(r, 300));
   lamp.reset();
-  return { bulb, service: bulb.service };
+  return { bulb, service: bulb.service, accessory };
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

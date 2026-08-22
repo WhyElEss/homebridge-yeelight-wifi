@@ -835,6 +835,29 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 21b
+  console.log('\n21b. The moonlight read is answered from memory too');
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { bulb, accessory } = await makeBulb(lamp, {}, { power: 'on' });
+    const moonlight = accessory.getService(global.Service.Switch);
+    if (!moonlight) {
+      check('a moonlight switch exists to read', false, 'no switch service');
+    } else {
+      bulb.lastMoonlightRead = Date.now();
+      await moonlight.getCharacteristic('On').read();
+      await sleep(150);
+      check(
+        'no command for a read',
+        lamp.methods().length === 0,
+        `${lamp.methods()}`
+      );
+    }
+    bulb.reset();
+    await lamp.close();
+  }
+
   // ---------------------------------------------------------------- 22
   console.log('\n22. Writes are accepted at once, not when the lamp answers');
   {
