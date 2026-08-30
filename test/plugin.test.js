@@ -1530,6 +1530,45 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 37
+  console.log('\n37. Each switch says which one it is');
+  {
+    const lamp = bedsideLamp('0');
+    await lamp.listen();
+    const { bulb, accessory } = await makeBulb(
+      lamp,
+      {},
+      { power: 'on', alert: { enabled: true, hue: 0, saturation: 100 } }
+    );
+    configureAlert(fakePlatform(), bulb, 'Lamp');
+
+    const labelOf = (service) =>
+      service.getCharacteristic('ConfiguredName').value;
+    check(
+      'the alert switch is labelled as the alert',
+      labelOf(alertSwitch(accessory)) === 'Lamp Alert',
+      `${labelOf(alertSwitch(accessory))}`
+    );
+    check(
+      'the moonlight switch as the moonlight',
+      labelOf(moonlightSwitch(accessory)) === 'Lamp Moonlight',
+      `${labelOf(moonlightSwitch(accessory))}`
+    );
+
+    // What the owner types in the Home app goes into the same characteristic.
+    alertSwitch(accessory)
+      .getCharacteristic('ConfiguredName')
+      .updateValue('Front door');
+    configureAlert(fakePlatform(), bulb, 'Lamp');
+    check(
+      'and a name the owner chose survives the next launch',
+      labelOf(alertSwitch(accessory)) === 'Front door',
+      `${labelOf(alertSwitch(accessory))}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }

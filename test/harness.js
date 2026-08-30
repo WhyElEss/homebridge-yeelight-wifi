@@ -99,6 +99,7 @@ global.Characteristic = {
   Hue: 'Hue',
   Saturation: 'Saturation',
   ColorTemperature: 'ColorTemperature',
+  ConfiguredName: 'ConfiguredName',
   Manufacturer: 'Manufacturer',
   Model: 'Model',
   SerialNumber: 'SerialNumber',

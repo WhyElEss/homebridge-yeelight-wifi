@@ -26,7 +26,27 @@ function switchService(accessory, subtype, name) {
     accessory.addService(new Service.Switch(name, subtype));
   service.displayName = name;
   service.setCharacteristic(Characteristic.Name, name);
+  nameService(service, name);
   return service;
+}
+
+// A service inside an accessory is labelled by its ConfiguredName. Recent iOS
+// ignores the Name characteristic there and falls back to the accessory's own
+// name, which is how a lamp came to show two switches both called after the
+// lamp, with nothing to say which was the alert and which the night mode.
+//
+// Written only when the service does not have one yet: ConfiguredName is what
+// the owner edits when they rename a tile in the Home app, and rewriting it on
+// every launch would undo that rename.
+function nameService(service, name) {
+  const { Characteristic } = global;
+  if (!Characteristic.ConfiguredName) return;
+  try {
+    service.addOptionalCharacteristic(Characteristic.ConfiguredName);
+    const configured = service.getCharacteristic(Characteristic.ConfiguredName);
+    if (!configured.value) configured.updateValue(name);
+    // eslint-disable-next-line no-empty
+  } catch (_) {}
 }
 
 function removeSwitch(accessory, subtype) {
