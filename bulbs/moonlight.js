@@ -14,6 +14,8 @@
 // flashing; a deliberate write is let through, and takes the switch down with
 // it rather than leaving it claiming a mode the lamp has already left.
 
+const { switchService, MOONLIGHT } = require('../switches');
+
 const DAYLIGHT_MODE = 0;
 const MOONLIGHT_MODE = 1;
 // set_power's optional "mode" parameter.
@@ -58,9 +60,14 @@ const MoonlightMode = (Device) =>
         this.moonlightProp === 'active_mode' ? activeMode : nightBrightness
       );
 
-      this.moonlightModeService =
-        this.accessory.getService(global.Service.Switch) ||
-        this.accessory.addService(new global.Service.Switch(`Moonlight Mode`));
+      // Named after the lamp and kept on the lamp's own accessory, next to the
+      // light and the alert switch: how those tiles are drawn is the owner's
+      // choice in the Home app, not ours.
+      this.moonlightModeService = switchService(
+        this.accessory,
+        MOONLIGHT,
+        `${this.name} Moonlight`
+      );
 
       this.moonlightModeService
         .getCharacteristic(global.Characteristic.On)

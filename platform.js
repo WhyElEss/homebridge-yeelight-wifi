@@ -9,13 +9,14 @@ const Alert = require('./bulbs/alert');
 const Backlight = require('./bulbs/backlight/bulb');
 const BacklightBrightness = require('./bulbs/backlight/brightness');
 const BacklightColor = require('./bulbs/backlight/color');
-const alertAccessory = require('./alert-accessory');
+const switches = require('./switches');
 const {
   getDeviceId,
   getName,
   blacklist,
   deviceEntry,
   resolveAlert,
+  resolveMoonlight,
   resolvePowerOn,
   sleep,
   pipe,
@@ -219,7 +220,7 @@ class YeePlatform {
 
     if (hidden === true) {
       this.log.debug(`Device ${name} is blacklisted, ignoring...`);
-      alertAccessory.remove(this, id);
+      switches.removeLegacyAlert(this, id, name);
       try {
         delete this.devices[id];
         delete this.bulbs[id];
@@ -275,6 +276,11 @@ class YeePlatform {
       this.api.updatePlatformAccessories([accessory]);
     }
 
+    // Both switches used to be somewhere else - the alert on an accessory of
+    // its own, the moonlight switch on a service with no subtype. Cleared here,
+    // on the first launch that sees them, before anything is built.
+    switches.removeLegacySwitches(this, accessory, id, name);
+
     if (accessory?.initialized) return;
 
     const mixins = [];
@@ -299,8 +305,10 @@ class YeePlatform {
     // mode is a state the lamp drops on any brightness or temperature command,
     // and it has to see them coming. It also has to read a property before
     // either of them does, which the same order gives.
-    if (!hidden.includes('active_mode')) {
+    if (this.moonlightFor(keys, hidden)) {
       mixins.push(MoonlightMode);
+    } else if (switches.removeSwitch(accessory, switches.MOONLIGHT)) {
+      this.log(`Removed the moonlight switch from ${name}.`);
     }
 
     if (features.includes('bg_set_power')) {
@@ -335,8 +343,16 @@ class YeePlatform {
       this
     );
     this.bulbs[id] = bulb;
-    alertAccessory.configure(this, bulb, { id, name });
+    switches.configureAlert(this, bulb, name);
     return bulb;
+  }
+
+  // Offered to every lamp that turns out to have the mode, and switched off
+  // per lamp from the settings form. `blacklist: ['active_mode']`, the older
+  // spelling, still says the same thing.
+  moonlightFor(keys, hidden) {
+    if (hidden.includes('active_mode')) return false;
+    return resolveMoonlight(deviceEntry(this.config, keys));
   }
 
   // A lamp's own alert block. There is no platform-wide default: an alert

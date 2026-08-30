@@ -118,9 +118,19 @@ class FakeAccessory {
     }
     return this.services.find((s) => s instanceof type);
   }
+  // Two Switch services on one accessory are the same type and differ only by
+  // subtype, which is what the real HAP getServiceById is for.
+  getServiceById(type, subtype) {
+    return this.services.find(
+      (s) => s instanceof type && s.subtype === subtype
+    );
+  }
   addService(service) {
     this.services.push(service);
     return service;
+  }
+  removeService(service) {
+    this.services = this.services.filter((s) => s !== service);
   }
   on() {
     return this;

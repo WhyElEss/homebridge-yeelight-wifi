@@ -1,4 +1,11 @@
 const { FakeLamp, makeBulb, sleep } = require('./harness');
+const {
+  ALERT,
+  MOONLIGHT,
+  configureAlert,
+  removeSwitch,
+  removeLegacySwitches,
+} = require('../switches');
 
 let pass = 0;
 let fail = 0;
@@ -19,6 +26,27 @@ const scene = (service, writes) =>
       service.getCharacteristic(char).write(value)
     )
   );
+
+// Both switches sit on the lamp's own accessory and are told apart by subtype.
+const moonlightSwitch = (accessory) =>
+  accessory.getServiceById(global.Service.Switch, MOONLIGHT);
+const alertSwitch = (accessory) =>
+  accessory.getServiceById(global.Service.Switch, ALERT);
+
+// Just enough platform for the switch wiring: a log and the shelf the legacy
+// alert accessories were restored onto.
+const fakePlatform = () => {
+  const unregistered = [];
+  return {
+    log: Object.assign(() => {}, { warn: () => {}, debug: () => {} }),
+    alerts: {},
+    unregistered,
+    api: {
+      unregisterPlatformAccessories: (_p, _n, accessories) =>
+        unregistered.push(...accessories),
+    },
+  };
+};
 
 async function run() {
   // ---------------------------------------------------------------- 1
@@ -535,6 +563,7 @@ async function run() {
       blacklist,
       deviceEntry,
       resolveAlert,
+      resolveMoonlight,
     } = require('../utils');
     const full = '0x000000001778cb4e';
     const keys = ['bslamp3-78cb4e', '78cb4e', full];
@@ -634,6 +663,32 @@ async function run() {
       ) === '["set_hsv"]',
       ''
     );
+    // The moonlight switch is opted out of, not into: a lamp that has the mode
+    // gets it unless its own entry says otherwise.
+    const moonlightFor = (config) =>
+      resolveMoonlight(deviceEntry(config, keys));
+    check(
+      'a lamp with no entry at all keeps its moonlight switch',
+      moonlightFor({}) === true,
+      ''
+    );
+    check(
+      'and so does one that simply says nothing about it',
+      moonlightFor({ devices: [{ id: '78cb4e', name: 'Main Bedroom' }] }) ===
+        true,
+      ''
+    );
+    check(
+      'false is the one thing that takes it away',
+      moonlightFor({ devices: [{ id: '78cb4e', moonlight: false }] }) === false,
+      ''
+    );
+    check(
+      'and it belongs to that lamp only',
+      moonlightFor({ devices: [{ id: 'aaaaaa', moonlight: false }] }) === true,
+      ''
+    );
+
     const clamped = resolveAlert({
       alert: { enabled: true, hue: 999, saturation: -5, brightness: 200 },
     });
@@ -841,7 +896,7 @@ async function run() {
     const lamp = new FakeLamp();
     await lamp.listen();
     const { bulb, accessory } = await makeBulb(lamp, {}, { power: 'on' });
-    const moonlight = accessory.getService(global.Service.Switch);
+    const moonlight = moonlightSwitch(accessory);
     if (!moonlight) {
       check('a moonlight switch exists to read', false, 'no switch service');
     } else {
@@ -945,8 +1000,6 @@ async function run() {
   // the plugin used to miss, since it asked only about active_mode.
   const bedsideLamp = (nl = '0') =>
     new FakeLamp({ props: { active_mode: '', nl_br: nl } });
-  const moonlightSwitch = (accessory) =>
-    accessory.getService(global.Service.Switch);
 
   // ---------------------------------------------------------------- 25
   console.log('\n25. Night mode is found through nl_br, not active_mode');
@@ -1252,6 +1305,147 @@ async function run() {
       'and the pre-alert brightness is what it will come back to',
       bulb.moonlightSnapshot && bulb.moonlightSnapshot.bright === 60,
       JSON.stringify(bulb.moonlightSnapshot)
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 32
+  console.log('\n32. Both switches live on the lamp, told apart by subtype');
+  {
+    const lamp = bedsideLamp('0');
+    await lamp.listen();
+    const { bulb, accessory } = await makeBulb(
+      lamp,
+      {},
+      { power: 'on', alert: { enabled: true, hue: 0, saturation: 100 } }
+    );
+    const platform = fakePlatform();
+    configureAlert(platform, bulb, 'Lamp');
+
+    const switches = accessory.services.filter(
+      (s) => s instanceof global.Service.Switch
+    );
+    check(
+      'two switches on one accessory',
+      switches.length === 2,
+      `${switches.length}`
+    );
+    check(
+      'and neither is the other',
+      !!alertSwitch(accessory) &&
+        !!moonlightSwitch(accessory) &&
+        alertSwitch(accessory) !== moonlightSwitch(accessory),
+      'the subtype lookup returned the same service twice'
+    );
+    check(
+      'each is named after the lamp',
+      alertSwitch(accessory).displayName === 'Lamp Alert' &&
+        moonlightSwitch(accessory).displayName === 'Lamp Moonlight',
+      `${alertSwitch(accessory).displayName} / ${
+        moonlightSwitch(accessory).displayName
+      }`
+    );
+    check(
+      'the light is still the primary service',
+      !!accessory.getService(global.Service.Lightbulb),
+      'no lightbulb service'
+    );
+
+    // The alert switch drives the lamp from its new home.
+    await alertSwitch(accessory).getCharacteristic('On').write(true);
+    await sleep(200);
+    check(
+      'the alert switch still flashes the lamp',
+      bulb.alertActive === true && lamp.methods().includes('set_hsv'),
+      `${bulb.alertActive} ${lamp.methods()}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 33
+  console.log('\n33. The old layout is migrated, once');
+  {
+    const lamp = bedsideLamp('0');
+    await lamp.listen();
+    const { bulb, accessory } = await makeBulb(lamp, {}, { power: 'on' });
+    const platform = fakePlatform();
+
+    // What the previous version left behind: a Switch with no subtype on the
+    // lamp, and an accessory of its own for the alert.
+    const orphan = accessory.addService(
+      new global.Service.Switch('Moonlight Mode')
+    );
+    const legacy = { displayName: 'Lamp Alert' };
+    platform.alerts['0xtest'] = legacy;
+
+    removeLegacySwitches(platform, accessory, '0xtest', 'Lamp');
+
+    check(
+      'the subtype-less switch is gone',
+      !accessory.services.includes(orphan),
+      'it is still there, with nothing behind it'
+    );
+    check(
+      'the subtyped one is untouched',
+      !!moonlightSwitch(accessory),
+      'the migration took the live switch with it'
+    );
+    check(
+      'the old alert accessory is unregistered',
+      platform.unregistered.includes(legacy) && !platform.alerts['0xtest'],
+      JSON.stringify(Object.keys(platform.alerts))
+    );
+
+    // Idempotent: a second launch finds nothing to do.
+    removeLegacySwitches(platform, accessory, '0xtest', 'Lamp');
+    check(
+      'and running it again changes nothing',
+      platform.unregistered.length === 1 && !!moonlightSwitch(accessory),
+      `${platform.unregistered.length}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 34
+  console.log('\n34. A switch turned off in the config leaves the accessory');
+  {
+    const lamp = bedsideLamp('0');
+    await lamp.listen();
+    const { bulb, accessory } = await makeBulb(
+      lamp,
+      {},
+      { power: 'on', alert: { enabled: true, hue: 0, saturation: 100 } }
+    );
+    const platform = fakePlatform();
+    configureAlert(platform, bulb, 'Lamp');
+    check('the alert switch is there', !!alertSwitch(accessory), 'missing');
+
+    bulb.alertEnabled = false;
+    configureAlert(platform, bulb, 'Lamp');
+    check(
+      'turning the alert off removes its switch',
+      !alertSwitch(accessory) && bulb.alertService === null,
+      'the switch outlived its setting'
+    );
+
+    check(
+      'and the moonlight switch can go the same way',
+      removeSwitch(accessory, MOONLIGHT) === true &&
+        !moonlightSwitch(accessory),
+      'still there'
+    );
+    check(
+      'the light itself is untouched',
+      !!accessory.getService(global.Service.Lightbulb),
+      'the lightbulb service went with them'
+    );
+    check(
+      'removing what is not there is a no-op',
+      removeSwitch(accessory, ALERT) === false,
+      'it claimed to remove something'
     );
     bulb.reset();
     await lamp.close();

@@ -66,6 +66,7 @@ lamp after: [ 'on', '20', '2703', '2' ]
 - Commands pending on a socket that closed were left to their own timeout instead of failing immediately.
 - TCP keep-alive, so a half-open socket is noticed instead of silently swallowing commands.
 - `active_mode` was stored as a string from property updates but compared against the number `1`, so moonlight mode never registered that way.
+- The alert switch was an accessory of its own and the night-mode switch a service with no subtype, so a lamp could not carry both and the Home app was never asked how to draw them. Both are services on the lamp now, told apart by subtype, and the old layout is migrated on first launch — see [Where the switches live](#where-the-switches-live).
 - Night mode was probed for with `active_mode` alone, a property the spec marks ceiling-light-only. Bedside lamps have the mode and answer that property with an empty string, so they never got a switch — see [Night mode](#night-mode-the-lamps-own-warm-dim-state).
 - The colour mixins kept `hue`/`sat` in module scope: the pair leaked between calls and stuck permanently once a send failed.
 - The device limits table is keyed by family (`bslamp`) but models report a variant (`bslamp3`), so the lookup never matched and every bedside lamp fell back to the default colour temperature range.
@@ -189,6 +190,7 @@ Per-lamp settings. A lamp that is not listed still works, on the platform defaul
 - `hidden` — `true` keeps the lamp out of HomeKit entirely.
 - `blacklist` — capabilities to keep out of HomeKit for this lamp. Edited in the JSON editor rather than the settings form, which has no widget that renders a list like this legibly. The values are the lamp's own method names, which the settings form shows under readable titles: `set_bright` brightness, `set_hsv` colour, `set_ct_abx` colour temperature (hiding it also removes Adaptive Lighting), `active_mode` night mode, `bg_set_power` / `bg_set_bright` / `bg_set_hsv` the backlight.
 - `powerOn.brightness` — the brightness this lamp wakes at when it is switched on by hand, and `powerOn.kelvin` — the white it wakes at when no Adaptive Lighting transition is running. See [Waking a lamp](#waking-a-lamp).
+- `moonlight` — `false` keeps the night-mode switch off this lamp. Defaults to `true`, which means every lamp that turns out to have the mode gets one. See [Night mode](#night-mode-the-lamps-own-warm-dim-state).
 - `alert` — gives this lamp an alert switch and sets its colour. See [`devices[].alert`](#devicesalert).
 
 A rename here is applied on every launch, not only when the accessory is first created.
@@ -236,7 +238,7 @@ This applies only when nothing else arrives in the same coalescing window. A sce
 
 ## Alert switch: flash and restore without losing Adaptive Lighting
 
-A lamp configured with `alert.enabled` gains a second accessory, a switch named after it, for automations like _"turn the lamp red while the front door is open, then put it back to whatever it was doing"_.
+A lamp configured with `alert.enabled` gains a switch named after it — `Entrance Night Light Alert`, on the lamp's own accessory — for automations like _"turn the lamp red while the front door is open, then put it back to whatever it was doing"_.
 
 - Switching it **on** snapshots the lamp's power, colour, colour temperature and brightness, then takes it to the alert colour. A lamp that was off is lit by a single `set_scene`.
 - Switching it **off** puts the snapshot back: the colour or the colour temperature it was on, and off again if that is how it started. The colour is restored before the power, so a lamp that was off does not come back red the next time anything switches it on.
@@ -266,9 +268,19 @@ A lamp that has one gains a second control on the same accessory — a switch ca
 
 **The lamp is the authority.** `nl_br` arrives in the lamp's own property notifications, so a mode ended by the Yeelight app, by another controller or by a scene of ours takes the switch down within a second. A lamp that is switched off reports `nl_br: 0`, which means the switch clears itself when the light goes out.
 
+**Turning it off.** Every lamp that has the mode gets the switch; `moonlight: false` on a lamp takes it away again, from the settings form or the JSON. `blacklist: ["active_mode"]`, the older spelling, still says the same thing. A lamp whose switch is turned off is not even probed for the mode, which is one command less per launch.
+
 **With the alert switch.** An alert is a colour, so it ends night mode as it lands. The alert's snapshot records the mode, and the restore brings it back with the same `set_power` rather than trying to reproduce it as a colour.
 
 Cost on the wire: one command in, two out — the temperature and the brightness.
+
+## Where the switches live
+
+Both switches — the alert and the night mode — are services on the lamp's own accessory, beside the light itself. That is one accessory per lamp, whatever it can do.
+
+It matters because the layout is then the owner's to choose. The Home app groups an accessory's controls into a single tile by default and splits them with **Show as separate tiles** in the accessory's settings; a plugin that registers an accessory per switch takes that choice away, and one that hides a switch inside the lamp without saying so leaves people wondering where the light's colour picker went — a grouped accessory is drawn without it.
+
+Earlier versions did both: the alert was an accessory of its own, and the night-mode switch a service with no subtype. Both are migrated on the first launch that sees them — the old accessory is unregistered, the old service removed — and the two switches now differ by subtype (`alert`, `moonlight`), which is what lets one accessory carry both.
 
 ## Tests
 

@@ -86,6 +86,11 @@ const resolveAlert = (entry) => {
   };
 };
 
+// The moonlight switch is offered to any lamp that turns out to have the mode,
+// and is switched off per lamp rather than opted into: unlike an alert, it is a
+// capability the lamp already has rather than a behaviour we invent for it.
+const resolveMoonlight = (entry) => entry.moonlight !== false;
+
 const handle =
   (handlers = []) =>
   (messages) => {
@@ -517,6 +522,7 @@ module.exports = {
   blacklist,
   deviceEntry,
   resolveAlert,
+  resolveMoonlight,
   resolvePowerOn,
   handle,
   sleep,

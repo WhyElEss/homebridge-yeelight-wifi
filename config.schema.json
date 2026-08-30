@@ -147,7 +147,7 @@
                     "const": "set_ct_abx"
                   },
                   {
-                    "title": "Moonlight mode (ceiling lamps)",
+                    "title": "Moonlight mode — same as switching it off below",
                     "const": "active_mode"
                   },
                   {
@@ -165,6 +165,12 @@
                 ]
               }
             },
+            "moonlight": {
+              "title": "Moonlight switch for this lamp",
+              "type": "boolean",
+              "default": true,
+              "description": "Lamps whose firmware has a night mode — one fixed warm amber at the lowest brightness — get a switch for it, “Entrance Night Light Moonlight”, alongside the light. Turn this off for a lamp that should not have one. A lamp without the mode never gets the switch either way."
+            },
             "alert": {
               "type": "object",
               "properties": {
@@ -172,7 +178,7 @@
                   "title": "Alert switch for this lamp",
                   "type": "boolean",
                   "default": false,
-                  "description": "Adds a second accessory for this lamp — a plain switch named after it, like “Entrance Night Light Alert”. Switching it on takes the lamp to the colour below and remembers what it was doing; switching it off puts it back exactly, Adaptive Lighting included."
+                  "description": "Adds a switch to this lamp — “Entrance Night Light Alert”, alongside the light itself. Switching it on takes the lamp to the colour below and remembers what it was doing; switching it off puts it back exactly, Adaptive Lighting included. Whether HomeKit draws it as its own tile is a per-accessory choice in the Home app: Show as separate tiles."
                 },
                 "hue": {
                   "title": "Alert Hue",
@@ -240,6 +246,7 @@
         "devices[].hidden",
         "devices[].powerOn.brightness",
         "devices[].powerOn.kelvin",
+        "devices[].moonlight",
         "devices[].alert.enabled",
         {
           "key": "devices[].alert.hue",
