@@ -280,6 +280,8 @@ Both switches — the alert and the night mode — are services on the lamp's ow
 
 It matters because the layout is then the owner's to choose. The Home app groups an accessory's controls into a single tile by default and splits them with **Show as separate tiles** in the accessory's settings; a plugin that registers an accessory per switch takes that choice away, and one that hides a switch inside the lamp without saying so leaves people wondering where the light's colour picker went — a grouped accessory is drawn without it.
 
+**Switching such a lamp off.** A grouped tile has no separate on/off to tap — the brightness slider is the whole control — so dragging it to the bottom is how the lamp goes off, and a brightness of zero is taken as exactly that. It has to be: the firmware has no zero, `set_bright` clamps it up to 1, and on a lamp that was already off the same request used to turn into the `set_scene` that wakes it. The lamp came back on at 1% instead of going out.
+
 Earlier versions did both: the alert was an accessory of its own, and the night-mode switch a service with no subtype. Both are migrated on the first launch that sees them — the old accessory is unregistered, the old service removed — and the two switches now differ by subtype (`alert`, `moonlight`), which is what lets one accessory carry both.
 
 ## Tests

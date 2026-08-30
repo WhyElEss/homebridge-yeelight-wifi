@@ -30,6 +30,9 @@ const MoonlightMode = (Device) =>
       super(props, platform);
       this.lastMoonlightRead = 0;
       this.activeMode = DAYLIGHT_MODE;
+      // The command taking the lamp into or out of the mode, while it is on
+      // the wire. Repeats of the same tap wait on it instead of adding to it.
+      this.moonlightPending = null;
       // Which property this lamp answers about its night mode with, once the
       // probe knows. Null until then, and for a lamp that has no night mode.
       this.moonlightProp = null;
@@ -69,8 +72,15 @@ const MoonlightMode = (Device) =>
         `${this.name} Moonlight`
       );
 
-      this.moonlightModeService
-        .getCharacteristic(global.Characteristic.On)
+      const characteristic = this.moonlightModeService.getCharacteristic(
+        global.Characteristic.On
+      );
+      // The service outlives a rebuild of the lamp behind it, and a second
+      // listener on the same characteristic would put a second command on the
+      // wire for every tap.
+      characteristic.removeAllListeners?.('set');
+      characteristic.removeAllListeners?.('get');
+      characteristic
         .on('set', (value, callback) => {
           this.accepted(this.setMoonlightMode(value), () =>
             this.publishMoonlightState()
@@ -141,12 +151,30 @@ const MoonlightMode = (Device) =>
         });
     }
 
+    // HomeKit can deliver the same tap more than once - a switch inside a
+    // grouped tile is easy to hit twice, and the Home app is not shy about
+    // repeating a write. A guard that only reads the mode lets every copy
+    // through, because none of them has changed anything yet when the next one
+    // arrives: five taps put five set_power on the wire, which is the burst
+    // this plugin exists to prevent. The mode moves before the await, and
+    // whoever asks for a state that is already being reached waits on the
+    // command already in flight.
     setMoonlightMode(state) {
-      return state ? this.enterMoonlight() : this.leaveMoonlight();
+      const wanted = !!state;
+      if (this.nightMode === wanted) {
+        return this.moonlightPending || Promise.resolve();
+      }
+
+      const pending = wanted ? this.enterMoonlight() : this.leaveMoonlight();
+      this.moonlightPending = pending;
+      const settled = () => {
+        if (this.moonlightPending === pending) this.moonlightPending = null;
+      };
+      pending.then(settled, settled);
+      return pending;
     }
 
     async enterMoonlight() {
-      if (this.nightMode) return;
       const { power: transition = 400 } = this.config.transitions || {};
 
       // Taken before the command goes out: from here on the brightness we know
@@ -158,12 +186,21 @@ const MoonlightMode = (Device) =>
         )}.`
       );
 
-      await this.sendCmd({
-        method: 'set_power',
-        params: ['on', 'smooth', transition, NIGHT_LIGHT],
-      });
-
+      // Claimed before the command goes out, and given back if it never lands.
       this.activeMode = MOONLIGHT_MODE;
+
+      try {
+        await this.sendCmd({
+          method: 'set_power',
+          params: ['on', 'smooth', transition, NIGHT_LIGHT],
+        });
+      } catch (err) {
+        this.activeMode = DAYLIGHT_MODE;
+        this.moonlightSnapshot = null;
+        this.publishMoonlightState();
+        throw err;
+      }
+
       // The command powers the lamp on as a side effect.
       this.power = 'on';
       this.publishMoonlightState();
@@ -179,8 +216,6 @@ const MoonlightMode = (Device) =>
     }
 
     async leaveMoonlight() {
-      if (!this.nightMode) return;
-
       const snap = this.moonlightSnapshot;
       this.moonlightSnapshot = null;
       this.activeMode = DAYLIGHT_MODE;

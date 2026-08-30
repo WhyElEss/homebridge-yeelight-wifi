@@ -1451,6 +1451,85 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 35
+  console.log('\n35. Brightness dragged to zero turns the lamp off');
+  {
+    const lamp = bedsideLamp('0');
+    await lamp.listen();
+    const { service } = await makeBulb(lamp, {}, { power: 'on', bright: '60' });
+
+    await service.getCharacteristic('Brightness').write(0);
+    await sleep(200);
+    const m = lamp.methods();
+    check(
+      'one command, and it is the power going off',
+      m.length === 1 &&
+        m[0] === 'set_power' &&
+        lamp.received[0].params[0] === 'off',
+      JSON.stringify(lamp.received.map((r) => [r.method, r.params]))
+    );
+    check(
+      'not a set_bright clamped up to 1%',
+      !m.includes('set_bright'),
+      `${m}`
+    );
+
+    // What the Home app actually sent: Off, and a trailing Brightness of 0 a
+    // second later. The second write used to wake the lamp back up at 1%.
+    lamp.reset();
+    await service.getCharacteristic('Brightness').write(0);
+    await sleep(200);
+    check(
+      'and a zero arriving at a lamp already off never wakes it',
+      !lamp.methods().includes('set_scene'),
+      `${lamp.methods()}`
+    );
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 36
+  console.log('\n36. The same tap arriving five times is still one command');
+  {
+    const lamp = bedsideLamp('0');
+    await lamp.listen();
+    const { accessory } = await makeBulb(lamp, {}, { power: 'on' });
+    const moonlight = moonlightSwitch(accessory);
+
+    await Promise.all(
+      Array.from({ length: 5 }, () =>
+        moonlight.getCharacteristic('On').write(true)
+      )
+    );
+    await sleep(300);
+    const m = lamp.methods();
+    check('one set_power, not five', m.length === 1, `${m.length}: ${m}`);
+    check(
+      'the switch is on',
+      moonlight.getCharacteristic('On').value === true,
+      `${moonlight.getCharacteristic('On').value}`
+    );
+
+    // And the way back out, hit just as often.
+    lamp.reset();
+    await Promise.all(
+      Array.from({ length: 5 }, () =>
+        moonlight.getCharacteristic('On').write(false)
+      )
+    );
+    await sleep(300);
+    check(
+      'leaving it is not five either',
+      lamp.methods().length <= 2,
+      `${lamp.methods()}`
+    );
+    check(
+      'and the switch is off',
+      moonlight.getCharacteristic('On').value === false,
+      `${moonlight.getCharacteristic('On').value}`
+    );
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }
