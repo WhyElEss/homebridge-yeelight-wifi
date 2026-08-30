@@ -144,6 +144,10 @@ class FakeLamp {
     this.live = 0;
     this.delay = opts.delay === undefined ? 20 : opts.delay;
     this.silent = !!opts.silent;
+    // What get_prop answers, per property. Without it every command is
+    // answered "ok", which is all most of these tests need. An empty string is
+    // how the firmware says it does not know a property.
+    this.props = opts.props || null;
     this.sockets = new Set();
     this.server = net.createServer((sock) => {
       this.connections += 1;
@@ -163,11 +167,15 @@ class FakeLamp {
           const msg = JSON.parse(line);
           this.received.push(msg);
           if (this.silent) return;
+          const result =
+            this.props && msg.method === 'get_prop'
+              ? msg.params.map((prop) =>
+                  this.props[prop] === undefined ? '' : this.props[prop]
+                )
+              : ['ok'];
           setTimeout(() => {
             if (!sock.destroyed) {
-              sock.write(
-                JSON.stringify({ id: msg.id, result: ['ok'] }) + '\r\n'
-              );
+              sock.write(JSON.stringify({ id: msg.id, result }) + '\r\n');
             }
           }, this.delay);
         });
@@ -206,13 +214,14 @@ const { pipe } = require('../utils');
 async function makeBulb(lamp, config = {}, props = {}) {
   const accessory = new FakeAccessory('Lamp');
   accessory.context.did = '0xtest';
-  // Alert last, mirroring platform.js: its setTemperature override has to sit
-  // outside the temperature mixin's.
+  // Order mirrors platform.js: moonlight outside brightness and temperature so
+  // it sees their writes coming, alert outside everything so its setTemperature
+  // override sits outermost of all.
   const Bulb = class extends pipe(
-    MoonlightMode,
     Brightness,
     Color,
     Temperature,
+    MoonlightMode,
     Alert
   )(YeeBulb) {};
   const bulb = new Bulb(

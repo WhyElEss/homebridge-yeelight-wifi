@@ -66,6 +66,7 @@ lamp after: [ 'on', '20', '2703', '2' ]
 - Commands pending on a socket that closed were left to their own timeout instead of failing immediately.
 - TCP keep-alive, so a half-open socket is noticed instead of silently swallowing commands.
 - `active_mode` was stored as a string from property updates but compared against the number `1`, so moonlight mode never registered that way.
+- Night mode was probed for with `active_mode` alone, a property the spec marks ceiling-light-only. Bedside lamps have the mode and answer that property with an empty string, so they never got a switch — see [Night mode](#night-mode-the-lamps-own-warm-dim-state).
 - The colour mixins kept `hue`/`sat` in module scope: the pair leaked between calls and stuck permanently once a send failed.
 - The device limits table is keyed by family (`bslamp`) but models report a variant (`bslamp3`), so the lookup never matched and every bedside lamp fell back to the default colour temperature range.
 - `isAdaptiveLightingActive` was called on a controller that stays an empty object on older Homebridge.
@@ -186,7 +187,7 @@ Per-lamp settings. A lamp that is not listed still works, on the platform defaul
 - `id` — how the lamp is identified. Any of the three forms it answers to: the full id (`0x000000001778cb4e`), its last six characters (`78cb4e`, which is what the log prints as `Received advertisement from 78cb4e`), or the `<model>-<id>` name (`bslamp3-78cb4e`). Case-insensitive.
 - `name` — the name shown in HomeKit. Defaults to `<model>-<id>`.
 - `hidden` — `true` keeps the lamp out of HomeKit entirely.
-- `blacklist` — capabilities to keep out of HomeKit for this lamp. Edited in the JSON editor rather than the settings form, which has no widget that renders a list like this legibly. The values are the lamp's own method names, which the settings form shows under readable titles: `set_bright` brightness, `set_hsv` colour, `set_ct_abx` colour temperature (hiding it also removes Adaptive Lighting), `active_mode` moonlight mode, `bg_set_power` / `bg_set_bright` / `bg_set_hsv` the backlight.
+- `blacklist` — capabilities to keep out of HomeKit for this lamp. Edited in the JSON editor rather than the settings form, which has no widget that renders a list like this legibly. The values are the lamp's own method names, which the settings form shows under readable titles: `set_bright` brightness, `set_hsv` colour, `set_ct_abx` colour temperature (hiding it also removes Adaptive Lighting), `active_mode` night mode, `bg_set_power` / `bg_set_bright` / `bg_set_hsv` the backlight.
 - `powerOn.brightness` — the brightness this lamp wakes at when it is switched on by hand, and `powerOn.kelvin` — the white it wakes at when no Adaptive Lighting transition is running. See [Waking a lamp](#waking-a-lamp).
 - `alert` — gives this lamp an alert switch and sets its colour. See [`devices[].alert`](#devicesalert).
 
@@ -250,6 +251,25 @@ Cost on the wire: one command to flash, one to restore — two if the lamp was o
 
 An `alert` block at the platform level, which earlier versions of this fork read as a default for every lamp, no longer does anything; the plugin says so in the log if it finds one.
 
+## Night mode: the lamp's own warm dim state
+
+A lamp that has one gains a second control on the same accessory — a switch called **Moonlight Mode**, next to the light itself. Night mode is not a brightness and not a colour temperature: it is a state of the firmware, the lamp at its dimmest in a fixed warm amber (`#FF9000` on a `bslamp3`) that no combination of the two reproduces.
+
+- Switching it **on** is a single `set_power` carrying the mode parameter the spec defines as _"5: turn on and switch to Night light mode"_. It lights a lamp that was off, and remembers the brightness the lamp was lit at.
+- Switching it **off** puts that brightness back, at the colour temperature the lamp should be at — the current point of a running Adaptive Lighting transition, if there is one. There is no separate command for leaving the mode: any temperature or brightness command ends it, so the restore is the way out.
+
+**Which lamps have it.** The spec reports the mode through two properties and marks one of them ceiling-light-only: `active_mode` (`0` daylight, `1` moonlight) and `nl_br`, the night light's brightness. A bedside lamp answers `active_mode` with an empty string and `nl_br` with a real number, so both are asked for, in one command, and the lamp's answer decides which one its mode is read from. Earlier versions asked only about `active_mode` and concluded that these lamps had no night mode at all. A lamp that answers neither gets no switch.
+
+**Why the switch is the only honest indicator.** While the mode is on, the lightbulb tile shows the lamp on at 1 %, at the white it was last at — HomeKit has no way to show amber without writing `Hue` and `Saturation`, and writing a characteristic is what takes Adaptive Lighting down. So the physical colour and the tile disagree by design, and the switch is what says which mode the lamp is in.
+
+**Adaptive Lighting.** The mode's natural enemy: the firmware leaves night mode on any `set_ct_abx` or `set_bright`, including one that changes nothing, and a transition nudges the temperature about once a minute. Background nudges are swallowed while the mode is on — and recorded, so switching the mode off lands the lamp on the curve where it stands then. A deliberate write is a different thing and is obeyed: moving the brightness or temperature slider ends the mode, and takes the switch down with it in the same moment.
+
+**The lamp is the authority.** `nl_br` arrives in the lamp's own property notifications, so a mode ended by the Yeelight app, by another controller or by a scene of ours takes the switch down within a second. A lamp that is switched off reports `nl_br: 0`, which means the switch clears itself when the light goes out.
+
+**With the alert switch.** An alert is a colour, so it ends night mode as it lands. The alert's snapshot records the mode, and the restore brings it back with the same `set_power` rather than trying to reproduce it as a colour.
+
+Cost on the wire: one command in, two out — the temperature and the brightness.
+
 ## Tests
 
 ```bash
@@ -257,6 +277,8 @@ npm test
 ```
 
 Runs the real bulb classes against a fake HAP and a fake lamp, asserting on what actually reaches the socket: that a scene is one `set_scene`, that `Hue` and `Saturation` merge, that an unanswered command costs one retry rather than six writes, that the quota gate holds, that a reply split across two TCP reads still parses, and that a lamp hanging up mid-command is recovered from.
+
+Night mode has a group of its own: that a lamp is found to have it through `nl_br` alone, that switching it on is one `set_power` carrying mode 5, that an Adaptive Lighting nudge never reaches a lamp in the mode while a deliberate write does and ends it, that a `nl_br` of 0 arriving from the lamp takes the switch down, and that switching the mode off restores the brightness the lamp was lit at.
 
 The alert has its own group: that flashing a lit lamp is a single `set_hsv`, that the restore reproduces the snapshot exactly and sends the power off in its own flush after the colour, that an Adaptive Lighting nudge arriving mid-alert never reaches the lamp but is still remembered for the restore, and that no characteristic is ever written — the one thing that would take Adaptive Lighting down.
 

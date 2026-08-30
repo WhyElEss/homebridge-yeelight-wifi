@@ -187,6 +187,9 @@ class YeeBulb {
       'sat',
       'color_mode',
       'active_mode',
+      // A bedside lamp never reports active_mode - the spec marks it ceiling
+      // only - so nl_br is the only sign that its night mode is on.
+      'nl_br',
     ].forEach((prop) => {
       if (props[prop] === undefined || props[prop] === '') return;
       this.updateStateFromProp(prop, props[prop]);
@@ -458,7 +461,15 @@ class YeeBulb {
   // rebuilt from the accessory cache rather than from an announcement, where
   // the starting state is however the lamp was last seen - possibly yesterday.
   refreshState() {
-    const props = ['power', 'bright', 'ct', 'hue', 'sat', 'color_mode'];
+    const props = [
+      'power',
+      'bright',
+      'ct',
+      'hue',
+      'sat',
+      'color_mode',
+      'nl_br',
+    ];
     return this.getProperty(props)
       .then((values) => {
         props.forEach((prop, i) => {
@@ -741,6 +752,29 @@ class YeeBulb {
 
   // Overridden by the temperature mixin.
   onTemperatureApplied() {}
+
+  // Overridden by the moonlight mixin. Every mixin that writes to the lamp asks
+  // this before it does: night mode is a state the firmware drops on its own
+  // the moment a brightness or temperature command lands.
+  get nightMode() {
+    return false;
+  }
+
+  // Overridden by the moonlight mixin, which uses it to take its switch down
+  // when a write it cannot stop is about to end the mode.
+  nightModeEnded() {}
+
+  // updateValue, never setValue: the first is how a plugin reports a change it
+  // made itself, the second reads as a HomeKit write and takes Adaptive
+  // Lighting down with it.
+  reflect(values) {
+    Object.entries(values).forEach(([characteristic, value]) => {
+      if (value === undefined || value === null) return;
+      this.service
+        .getCharacteristic(global.Characteristic[characteristic])
+        .updateValue(value);
+    });
+  }
 
   setPower(power) {
     // `force` keeps an explicit HomeKit write authoritative even when our

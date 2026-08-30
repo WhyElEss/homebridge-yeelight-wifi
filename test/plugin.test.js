@@ -941,6 +941,322 @@ async function run() {
     await lamp.close();
   }
 
+  // A bedside lamp: no active_mode at all, and a real nl_br. This is the shape
+  // the plugin used to miss, since it asked only about active_mode.
+  const bedsideLamp = (nl = '0') =>
+    new FakeLamp({ props: { active_mode: '', nl_br: nl } });
+  const moonlightSwitch = (accessory) =>
+    accessory.getService(global.Service.Switch);
+
+  // ---------------------------------------------------------------- 25
+  console.log('\n25. Night mode is found through nl_br, not active_mode');
+  {
+    const lamp = bedsideLamp('0');
+    await lamp.listen();
+    const { bulb, accessory } = await makeBulb(lamp, {}, { power: 'on' });
+    const moonlight = moonlightSwitch(accessory);
+    check('the lamp gets a moonlight switch', !!moonlight, 'no switch service');
+    check(
+      'the mode is read from nl_br',
+      bulb.moonlightProp === 'nl_br',
+      `${bulb.moonlightProp}`
+    );
+    check(
+      'and it starts off',
+      !!moonlight && moonlight.getCharacteristic('On').value === false,
+      `${moonlight && moonlight.getCharacteristic('On').value}`
+    );
+    bulb.reset();
+    await lamp.close();
+
+    const plain = new FakeLamp({ props: { active_mode: '', nl_br: '' } });
+    await plain.listen();
+    const { bulb: dumb, accessory: bare } = await makeBulb(plain);
+    check(
+      'a lamp that knows neither property gets no switch',
+      !moonlightSwitch(bare),
+      'a switch was added anyway'
+    );
+    dumb.reset();
+    await plain.close();
+  }
+
+  // ---------------------------------------------------------------- 26
+  console.log('\n26. Switching it on is one set_power, carrying mode 5');
+  {
+    const lamp = bedsideLamp('0');
+    await lamp.listen();
+    const { bulb, service, accessory } = await makeBulb(
+      lamp,
+      {},
+      { power: 'off', bright: '60' }
+    );
+    const moonlight = moonlightSwitch(accessory);
+    await moonlight.getCharacteristic('On').write(true);
+    await sleep(200);
+    const m = lamp.methods();
+    check('one command total', m.length === 1, `${m.length}: ${m}`);
+    check(
+      'and it is set_power with mode 5',
+      m[0] === 'set_power' &&
+        JSON.stringify(lamp.received[0].params) ===
+          JSON.stringify(['on', 'smooth', 400, 5]),
+      JSON.stringify(lamp.received.map((r) => [r.method, r.params]))
+    );
+    check(
+      'HomeKit shows the lamp on at the night light',
+      service.getCharacteristic('On').value === true &&
+        service.getCharacteristic('Brightness').value === 1,
+      `${service.getCharacteristic('On').value} ${
+        service.getCharacteristic('Brightness').value
+      }`
+    );
+    check(
+      'nothing was written to HomeKit, only reported',
+      service.getCharacteristic('On').hapWrites.length === 0 &&
+        service.getCharacteristic('Brightness').hapWrites.length === 0,
+      'a characteristic was written, which takes Adaptive Lighting down'
+    );
+    check(
+      'the brightness to come back to is remembered',
+      bulb.moonlightSnapshot && bulb.moonlightSnapshot.bright === 60,
+      JSON.stringify(bulb.moonlightSnapshot)
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 27
+  console.log('\n27. Adaptive Lighting cannot end the mode, a person can');
+  {
+    const lamp = bedsideLamp('0');
+    await lamp.listen();
+    const { bulb, service, accessory } = await makeBulb(
+      lamp,
+      {},
+      { power: 'on', bright: '60' }
+    );
+    const moonlight = moonlightSwitch(accessory);
+    await moonlight.getCharacteristic('On').write(true);
+    await sleep(200);
+    lamp.reset();
+
+    // The nudge the real lamp answered by dropping out of night mode.
+    await service
+      .getCharacteristic('ColorTemperature')
+      .write(300, { controller: {} });
+    await sleep(200);
+    check(
+      'a background nudge never reaches the lamp',
+      lamp.methods().length === 0,
+      `${lamp.methods()}`
+    );
+    check(
+      'the mode is still on',
+      moonlight.getCharacteristic('On').value === true,
+      `${moonlight.getCharacteristic('On').value}`
+    );
+    check(
+      'but the nudge is remembered for the way out',
+      bulb.temperature === 300,
+      `${bulb.temperature}`
+    );
+
+    // The same value, arriving as a deliberate write.
+    await service.getCharacteristic('ColorTemperature').write(300);
+    await sleep(200);
+    check(
+      'a deliberate write is obeyed',
+      lamp.methods().length === 1 && lamp.methods()[0] === 'set_ct_abx',
+      `${lamp.methods()}`
+    );
+    check(
+      'and takes the switch down with it',
+      moonlight.getCharacteristic('On').value === false,
+      `${moonlight.getCharacteristic('On').value}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 28
+  console.log('\n28. The brightness slider ends the mode and is obeyed');
+  {
+    const lamp = bedsideLamp('0');
+    await lamp.listen();
+    const { bulb, service, accessory } = await makeBulb(
+      lamp,
+      {},
+      { power: 'on', bright: '60' }
+    );
+    const moonlight = moonlightSwitch(accessory);
+    await moonlight.getCharacteristic('On').write(true);
+    await sleep(200);
+    lamp.reset();
+
+    await service.getCharacteristic('Brightness').write(40);
+    await sleep(200);
+    check(
+      'the brightness reached the lamp',
+      lamp.methods().length === 1 && lamp.methods()[0] === 'set_bright',
+      `${lamp.methods()}`
+    );
+    check(
+      'the switch went down with it',
+      moonlight.getCharacteristic('On').value === false,
+      `${moonlight.getCharacteristic('On').value}`
+    );
+    check(
+      'and the brightness is the one that was asked for',
+      service.getCharacteristic('Brightness').value === 40,
+      `${service.getCharacteristic('Brightness').value}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 29
+  console.log('\n29. The lamp is the authority on the mode');
+  {
+    const lamp = bedsideLamp('0');
+    await lamp.listen();
+    const { bulb, service, accessory } = await makeBulb(
+      lamp,
+      {},
+      { power: 'on', bright: '60' }
+    );
+    const moonlight = moonlightSwitch(accessory);
+
+    // Someone used the Yeelight app: the lamp says so and nothing else does.
+    bulb.stateHandler({ method: 'props', params: { nl_br: 1, bright: 1 } });
+    check(
+      'a night light burning turns the switch on',
+      moonlight.getCharacteristic('On').value === true,
+      `${moonlight.getCharacteristic('On').value}`
+    );
+    check(
+      'and the brightness comes from nl_br',
+      service.getCharacteristic('Brightness').value === 1,
+      `${service.getCharacteristic('Brightness').value}`
+    );
+
+    // The only notification the real lamp sends when a set_bright ends it.
+    bulb.stateHandler({ method: 'props', params: { nl_br: 0 } });
+    check(
+      'nl_br going out takes the switch with it',
+      moonlight.getCharacteristic('On').value === false,
+      `${moonlight.getCharacteristic('On').value}`
+    );
+
+    bulb.stateHandler({ method: 'props', params: { bright: 70 } });
+    check(
+      'and the daylight brightness is followed again',
+      service.getCharacteristic('Brightness').value === 70,
+      `${service.getCharacteristic('Brightness').value}`
+    );
+    check(
+      'none of it was a HomeKit write',
+      service.getCharacteristic('Brightness').hapWrites.length === 0 &&
+        moonlight.getCharacteristic('On').hapWrites.length === 0,
+      'a characteristic was written'
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 30
+  console.log('\n30. Switching it off puts back what the lamp was lit at');
+  {
+    const lamp = bedsideLamp('0');
+    await lamp.listen();
+    const { bulb, service, accessory } = await makeBulb(
+      lamp,
+      {},
+      { power: 'on', bright: '60', ct: '2702' }
+    );
+    const moonlight = moonlightSwitch(accessory);
+    await moonlight.getCharacteristic('On').write(true);
+    await sleep(200);
+    lamp.reset();
+
+    await moonlight.getCharacteristic('On').write(false);
+    await sleep(250);
+    const m = lamp.methods();
+    check(
+      'the temperature and the brightness, and nothing else',
+      m.length === 2 && m.includes('set_ct_abx') && m.includes('set_bright'),
+      `${m}`
+    );
+    check(
+      'the brightness is the one from before the mode',
+      service.getCharacteristic('Brightness').value === 60,
+      `${service.getCharacteristic('Brightness').value}`
+    );
+    check(
+      'the switch is off',
+      moonlight.getCharacteristic('On').value === false,
+      `${moonlight.getCharacteristic('On').value}`
+    );
+    check(
+      'and the lamp is still on',
+      service.getCharacteristic('On').value === true,
+      `${service.getCharacteristic('On').value}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 31
+  console.log('\n31. An alert ends night mode, and the restore brings it back');
+  {
+    const lamp = bedsideLamp('0');
+    await lamp.listen();
+    const { bulb, accessory } = await makeBulb(
+      lamp,
+      {},
+      {
+        power: 'on',
+        bright: '60',
+        alert: { enabled: true, hue: 0, saturation: 100 },
+      }
+    );
+    const moonlight = moonlightSwitch(accessory);
+    await moonlight.getCharacteristic('On').write(true);
+    await sleep(200);
+
+    await bulb.setAlert(true);
+    check(
+      'the alert colour ends the mode',
+      moonlight.getCharacteristic('On').value === false,
+      `${moonlight.getCharacteristic('On').value}`
+    );
+
+    lamp.reset();
+    await bulb.setAlert(false);
+    await sleep(200);
+    const m = lamp.methods();
+    check(
+      'the restore is a set_power in mode 5, not a colour',
+      m.length === 1 &&
+        m[0] === 'set_power' &&
+        JSON.stringify(lamp.received[0].params) ===
+          JSON.stringify(['on', 'smooth', 400, 5]),
+      JSON.stringify(lamp.received.map((r) => [r.method, r.params]))
+    );
+    check(
+      'the switch is back on',
+      moonlight.getCharacteristic('On').value === true,
+      `${moonlight.getCharacteristic('On').value}`
+    );
+    check(
+      'and the pre-alert brightness is what it will come back to',
+      bulb.moonlightSnapshot && bulb.moonlightSnapshot.bright === 60,
+      JSON.stringify(bulb.moonlightSnapshot)
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }

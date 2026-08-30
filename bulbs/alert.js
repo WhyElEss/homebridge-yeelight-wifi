@@ -50,6 +50,11 @@ const Alert = (Device) =>
         sat: this.sat,
         ct: this.temperature,
         colorMode: this.colorMode,
+        nightMode: this.nightMode,
+        // Taken before the alert ends the mode, and with it whatever the lamp
+        // was lit at before the mode began - `bright` above is only the night
+        // light's 1% while the mode is on.
+        moonlight: this.moonlightSnapshot,
       };
     }
 
@@ -71,6 +76,10 @@ const Alert = (Device) =>
       // No `force`: an explicit set_power would be a second command on a lamp
       // that is already lit, and one that is off gets its power from the
       // set_scene this turns into.
+      // The colour ends night mode in the firmware; the switch goes down with
+      // it, and the restore below is what brings the mode back.
+      this.nightModeEnded();
+
       const patch = { power: true, hue, sat: saturation };
       if (Number.isFinite(brightness)) patch.bright = brightness;
 
@@ -100,6 +109,25 @@ const Alert = (Device) =>
         this.log.warn(
           `${this.tag}: nothing was snapshotted, leaving the lamp as it is.`
         );
+        return;
+      }
+
+      // Night mode is not a colour that can be put back with the rest: the
+      // alert's set_hsv ended it in the firmware, and only set_power's mode 5
+      // brings it back.
+      if (snap.nightMode) {
+        await this.enterMoonlight();
+        // Entering took its snapshot while the alert colour was in force, so
+        // the one from before the alert goes back in its place.
+        this.moonlightSnapshot = snap.moonlight || {
+          bright: snap.bright,
+          power: snap.power,
+        };
+        if (!snap.power) {
+          await this.applyState({ power: false, force: true });
+          this.reflect({ On: false });
+        }
+        this.log.debug(`${this.tag}: alert off, night mode back on.`);
         return;
       }
 
@@ -148,18 +176,6 @@ const Alert = (Device) =>
     restoresColorTemperature(snap) {
       if (snap.colorMode === CT_MODE) return true;
       return !Number.isFinite(snap.hue) || !Number.isFinite(snap.sat);
-    }
-
-    // updateValue, never setValue: the first is how a plugin reports a change
-    // it made itself, the second reads as a HomeKit write and takes Adaptive
-    // Lighting down with it.
-    reflect(values) {
-      Object.entries(values).forEach(([characteristic, value]) => {
-        if (value === undefined || value === null) return;
-        this.service
-          .getCharacteristic(global.Characteristic[characteristic])
-          .updateValue(value);
-      });
     }
 
     publishAlertState() {

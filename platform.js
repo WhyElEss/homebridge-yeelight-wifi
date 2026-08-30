@@ -280,10 +280,6 @@ class YeePlatform {
     const mixins = [];
     const limits = this.limitsFor(model);
 
-    if (!hidden.includes('active_mode')) {
-      mixins.push(MoonlightMode);
-    }
-
     if (features.includes('set_bright')) {
       this.log(`Device ${name} supports brightness`);
       mixins.push(Brightness);
@@ -297,6 +293,14 @@ class YeePlatform {
     if (features.includes('set_ct_abx')) {
       this.log(`Device ${name} supports color temperature`);
       mixins.push(Temperature);
+    }
+
+    // After brightness and temperature, so its overrides wrap theirs: night
+    // mode is a state the lamp drops on any brightness or temperature command,
+    // and it has to see them coming. It also has to read a property before
+    // either of them does, which the same order gives.
+    if (!hidden.includes('active_mode')) {
+      mixins.push(MoonlightMode);
     }
 
     if (features.includes('bg_set_power')) {

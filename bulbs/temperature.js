@@ -30,24 +30,13 @@ const Temperature = (Device) =>
         // same SET handler, passing `{ controller, omitEventUpdate }` as the
         // context. A person dragging the temperature slider arrives without
         // it, which is the only way to tell a background nudge from a
-        // deliberate change - see the alert mixin, which suppresses the
-        // former while a lamp is flashing.
+        // deliberate change - see the alert and moonlight mixins, which
+        // suppress the former while a lamp is flashing or in night mode.
         .on('set', (value, callback, context) => {
           const fromAdaptiveLighting =
             typeof context === 'object' &&
             context !== null &&
             'controller' in context;
-
-          // In moonlight mode (1) do not attempt to change the temperature
-          // since it would switch the device to daylight mode (0)
-          if (this.activeMode === 1) {
-            this.log.debug(
-              `Device ${this.name} is in moonlight mode.`,
-              'Skipping setting temperature.'
-            );
-            callback(null);
-            return;
-          }
 
           this.accepted(this.setTemperature(value, fromAdaptiveLighting), () =>
             this.service

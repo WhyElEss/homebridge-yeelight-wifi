@@ -34,10 +34,13 @@ const Brightness = (Device) =>
     }
 
     updateStateFromProp(prop, value) {
-      // There are different props being used for brightness
-      // depending on the active_mode in Ceiling lamps
-      if (prop === 'bright' && this.activeMode === 1) return;
-      if (prop === 'nl_br' && this.activeMode !== 1) return;
+      // Which property carries the brightness depends on the mode: in night
+      // mode the lamp reports nl_br, and goes on reporting the daylight
+      // `bright` it will return to, which is not what is lit right now. The
+      // moonlight mixin sits outside this one, so by the time either prop
+      // arrives here the mode is already known.
+      if (prop === 'bright' && this.nightMode) return;
+      if (prop === 'nl_br' && !this.nightMode) return;
       if (['bright', 'nl_br'].includes(prop)) {
         this.bright = value;
         this.service
