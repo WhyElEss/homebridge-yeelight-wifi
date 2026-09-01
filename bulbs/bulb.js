@@ -45,6 +45,13 @@ class YeeBulb {
     // between the reads that ask for it anyway.
     this.lastPowerRead = 0;
     this.staleAfter = (this.config.connection || {}).staleAfter ?? 60000;
+    // The lamp announces every change it makes, our own included. Handing that
+    // echo back to HomeKit is how a slider gets pulled out from under a
+    // finger: the lamp confirms the value it has reached while the person is
+    // still moving towards a later one, and the tile snaps backwards. What we
+    // asked for is recorded here so the confirmation can be recognised.
+    this.commanded = new Map();
+    this.echoWindow = (this.config.connection || {}).echoWindow ?? 4000;
     // Commands go out one at a time: a burst of parallel writes is exactly
     // what the quota counts.
     this.queue = Promise.resolve();
@@ -353,6 +360,7 @@ class YeeBulb {
       return;
     }
     this.power = value;
+    if (!this.publishable('power', value)) return;
     this.service
       .getCharacteristic(global.Characteristic.On)
       .updateValue(this.power);
@@ -561,9 +569,40 @@ class YeeBulb {
 
     // Enqueued synchronously so the whole flush takes consecutive slots and
     // cannot be interleaved with another one.
-    const runs = steps.map(({ cmd, commit }) => this.enqueue(cmd).then(commit));
+    const runs = steps.map(({ cmd, commit, echo }) => {
+      // Recorded at enqueue time, not on commit: the lamp's announcement can
+      // arrive in the same read as the reply that resolves the command, and
+      // is handled before the commit's microtask ever runs.
+      if (echo) this.noteCommanded(echo);
+      return this.enqueue(cmd).then(commit);
+    });
     runs.forEach((run) => run.catch(() => {}));
     Promise.all(runs).then(() => settle.resolve(), settle.reject);
+  }
+
+  noteCommanded(values) {
+    const at = Date.now();
+    Object.entries(values).forEach(([prop, value]) => {
+      if (value === undefined || value === null) return;
+      this.commanded.set(prop, { value: String(value), at });
+    });
+  }
+
+  // Whether a property change is news for HomeKit. Our own echo is not: the
+  // controller already holds the value it asked for, and pushing the lamp's
+  // confirmation on top of it only fights whoever is still dragging. A change
+  // from anywhere else - the lamp's own button, the Yeelight app, a scene
+  // running on the lamp - does not match anything we asked for and goes
+  // through.
+  publishable(prop, value) {
+    // A newer value for the same property has not been sent yet, so what the
+    // lamp is reporting is already out of date.
+    if (this.desired && this.desired[prop] !== undefined) return false;
+
+    const commanded = this.commanded.get(prop);
+    if (!commanded) return true;
+    if (Date.now() - commanded.at > this.echoWindow) return true;
+    return String(value) !== commanded.value;
   }
 
   commandsFor(desired) {
@@ -582,6 +621,7 @@ class YeeBulb {
             method: 'set_power',
             params: ['off', 'smooth', powerTransition],
           },
+          echo: { power: 'off' },
           commit: () => {
             this.power = 'off';
           },
@@ -612,6 +652,7 @@ class YeeBulb {
     if (wantsOn && (!this.power || desired.force)) {
       steps.push({
         cmd: { method: 'set_power', params: ['on', 'smooth', powerTransition] },
+        echo: { power: 'on' },
         commit: () => {
           this.power = 'on';
         },
@@ -631,6 +672,7 @@ class YeeBulb {
             method: 'set_hsv',
             params: [hue, sat, 'smooth', colorTransition],
           },
+          echo: { hue, sat },
           commit: () => {
             this._hue = hue;
             this._sat = sat;
@@ -646,6 +688,7 @@ class YeeBulb {
           method: 'set_ct_abx',
           params: [kelvin, 'smooth', temperatureTransition],
         },
+        echo: { ct: kelvin },
         commit: () => {
           this._temperature = desired.ct;
           this.colorMode = 2;
@@ -661,6 +704,7 @@ class YeeBulb {
           method: 'set_bright',
           params: [bright, 'smooth', brightnessTransition],
         },
+        echo: { bright },
         commit: () => {
           this._bright = desired.bright;
         },
@@ -709,10 +753,10 @@ class YeeBulb {
     const mired = this.adaptiveLighting
       ? this.temperature
       : brightness || kelvin
-      ? kelvin
-        ? 10 ** 6 / kelvin
-        : this.temperature
-      : undefined;
+        ? kelvin
+          ? 10 ** 6 / kelvin
+          : this.temperature
+        : undefined;
     if (Number.isFinite(mired)) patch.ct = mired;
 
     if (!Object.keys(patch).length) return desired;
@@ -742,6 +786,7 @@ class YeeBulb {
       if (!Number.isFinite(hue) || !Number.isFinite(sat)) return null;
       return {
         cmd: { method: 'set_scene', params: ['hsv', hue, sat, level] },
+        echo: { power: 'on', hue, sat, bright: level },
         commit: () => {
           this.power = 'on';
           this._hue = hue;
@@ -754,11 +799,10 @@ class YeeBulb {
     const mired = desired.ct === undefined ? this.temperature : desired.ct;
     if (!Number.isFinite(mired)) return null;
 
+    const kelvin = Math.round(10 ** 6 / mired);
     return {
-      cmd: {
-        method: 'set_scene',
-        params: ['ct', Math.round(10 ** 6 / mired), level],
-      },
+      cmd: { method: 'set_scene', params: ['ct', kelvin, level] },
+      echo: { power: 'on', ct: kelvin, bright: level },
       commit: () => {
         this.power = 'on';
         this._temperature = mired;

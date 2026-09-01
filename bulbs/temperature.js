@@ -109,6 +109,7 @@ const Temperature = (Device) =>
       switch (prop) {
         case 'ct':
           this.temperature = value;
+          if (!this.publishable(prop, value)) break;
           this.service
             .getCharacteristic(global.Characteristic.ColorTemperature)
             .updateValue(this.temperature);

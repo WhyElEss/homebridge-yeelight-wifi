@@ -65,6 +65,9 @@ class FakeService {
     if (!this.chars.has(id)) this.chars.set(id, new FakeCharacteristic(id));
     return this.chars.get(id);
   }
+  testCharacteristic(id) {
+    return this.chars.has(id);
+  }
   addCharacteristic(id) {
     return this.getCharacteristic(id);
   }
@@ -159,6 +162,9 @@ class FakeLamp {
     // answered "ok", which is all most of these tests need. An empty string is
     // how the firmware says it does not know a property.
     this.props = opts.props || null;
+    // Real firmware announces every change it makes on the open socket,
+    // unprompted. Off by default: most tests only care what reaches the wire.
+    this.echo = !!opts.echo;
     this.sockets = new Set();
     this.server = net.createServer((sock) => {
       this.connections += 1;
@@ -185,9 +191,14 @@ class FakeLamp {
                 )
               : ['ok'];
           setTimeout(() => {
-            if (!sock.destroyed) {
-              sock.write(JSON.stringify({ id: msg.id, result }) + '\r\n');
-            }
+            if (sock.destroyed) return;
+            sock.write(JSON.stringify({ id: msg.id, result }) + '\r\n');
+            if (!this.echo) return;
+            const props = this.propsFor(msg);
+            if (!props) return;
+            sock.write(
+              JSON.stringify({ method: 'props', params: props }) + '\r\n'
+            );
           }, this.delay);
         });
       });
@@ -205,6 +216,29 @@ class FakeLamp {
     this.sockets.clear();
     return new Promise((r) => this.server.close(() => r()));
   }
+  // What the lamp announces once it has carried a command out.
+  propsFor(msg) {
+    const p = msg.params || [];
+    if (msg.method === 'set_bright') return { bright: String(p[0]) };
+    if (msg.method === 'set_power') return { power: String(p[0]) };
+    if (msg.method === 'set_ct_abx') return { ct: String(p[0]) };
+    if (msg.method === 'set_hsv') {
+      return { hue: String(p[0]), sat: String(p[1]) };
+    }
+    if (msg.method === 'set_scene' && p[0] === 'ct') {
+      return { power: 'on', ct: String(p[1]), bright: String(p[2]) };
+    }
+    if (msg.method === 'set_scene' && p[0] === 'hsv') {
+      return {
+        power: 'on',
+        hue: String(p[1]),
+        sat: String(p[2]),
+        bright: String(p[3]),
+      };
+    }
+    return null;
+  }
+
   methods() {
     return this.received.map((m) => m.method);
   }
@@ -259,4 +293,4 @@ async function makeBulb(lamp, config = {}, props = {}) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-module.exports = { FakeLamp, makeBulb, sleep, log };
+module.exports = { FakeLamp, FakeAccessory, makeBulb, sleep, log };

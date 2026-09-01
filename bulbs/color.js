@@ -51,6 +51,7 @@ const Color = (Device) =>
     updateStateFromProp(prop, value) {
       if (prop === 'hue') {
         this.hue = value;
+        if (!this.publishable(prop, value)) return;
         this.service
           .getCharacteristic(global.Characteristic.Hue)
           .updateValue(this.hue);
@@ -58,6 +59,7 @@ const Color = (Device) =>
       }
       if (prop === 'sat') {
         this.sat = value;
+        if (!this.publishable(prop, value)) return;
         this.service
           .getCharacteristic(global.Characteristic.Saturation)
           .updateValue(this.sat);

@@ -53,6 +53,11 @@ const Brightness = (Device) =>
       if (prop === 'nl_br' && !this.nightMode) return;
       if (['bright', 'nl_br'].includes(prop)) {
         this.bright = value;
+        // The cache always follows the lamp; HomeKit only hears about changes
+        // that did not come from us. Confirming our own set_bright to a
+        // controller that already holds a later value is what drags a slider
+        // backwards under the finger that is still moving it.
+        if (!this.publishable(prop, value)) return;
         this.service
           .getCharacteristic(global.Characteristic.Brightness)
           .updateValue(this.bright);

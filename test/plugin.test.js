@@ -1667,6 +1667,105 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 40
+  console.log(
+    '\n40. A finger on the brightness slider is not fought by the lamp'
+  );
+  {
+    const lamp = new FakeLamp({ echo: true });
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(
+      lamp,
+      {},
+      {
+        power: 'off',
+        bright: '5',
+        ct: '2967',
+      }
+    );
+    lamp.reset();
+
+    const brightness = service.getCharacteristic('Brightness');
+    const pushed = [];
+    const update = brightness.updateValue.bind(brightness);
+    brightness.updateValue = (v) => {
+      pushed.push(v);
+      return update(v);
+    };
+
+    service
+      .getCharacteristic('On')
+      .write(true)
+      .catch(() => {});
+    for (const v of [5, 20, 66, 100]) {
+      brightness.value = v;
+      brightness.write(v).catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      await sleep(150);
+    }
+    await sleep(700);
+
+    const backwards = pushed.filter((v) => v !== 100);
+    console.log(
+      '     wire:',
+      JSON.stringify(lamp.received.map((r) => [r.method, r.params]))
+    );
+    console.log('     pushed at HomeKit:', JSON.stringify(pushed));
+    check(
+      'the lamp reached the value asked for',
+      lamp.received.some((r) => JSON.stringify(r.params).includes('100')),
+      JSON.stringify(lamp.methods())
+    );
+    check(
+      'no stale value pushed over the moving slider',
+      backwards.length === 0,
+      JSON.stringify(backwards)
+    );
+    check(
+      'cache still followed the lamp',
+      bulb.bright === 100,
+      `${bulb.bright}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 41
+  console.log('\n41. A change made anywhere else still reaches HomeKit');
+  {
+    const lamp = new FakeLamp({ echo: true });
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(
+      lamp,
+      {},
+      { power: 'on', bright: '50' }
+    );
+    lamp.reset();
+
+    const brightness = service.getCharacteristic('Brightness');
+    // Somebody presses the lamp's own button.
+    bulb.updateStateFromProp('bright', '17');
+    check(
+      'an unsolicited change is published',
+      brightness.value === 17,
+      `${brightness.value}`
+    );
+
+    // Our own echo, arriving right after we commanded it, is not.
+    await service.getCharacteristic('Brightness').write(80);
+    await sleep(300);
+    const before = brightness.value;
+    bulb.updateStateFromProp('bright', '80');
+    check(
+      'our own echo is held back',
+      brightness.value === before,
+      `${before} -> ${brightness.value}`
+    );
+    check('but the cache took it', bulb.bright === 80, `${bulb.bright}`);
+    bulb.reset();
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }
