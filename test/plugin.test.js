@@ -1766,6 +1766,39 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 42
+  console.log('\n42. A remembered colour temperature survives a restart');
+  {
+    const YeePlatform = require('../platform');
+    const service = new global.Service.Lightbulb('Lamp');
+    service.getCharacteristic(global.Characteristic.On).updateValue(true);
+    service
+      .getCharacteristic(global.Characteristic.ColorTemperature)
+      .updateValue(385);
+
+    const state = YeePlatform.prototype.rememberedState.call(
+      {},
+      {
+        getService: () => service,
+        context: {},
+      }
+    );
+
+    // 385 mired is 2597 K. Everything downstream of props.ct speaks the lamp's
+    // Kelvin, and handing the mired over unconverted had it inverted a second
+    // time - straight past the 500 the characteristic allows.
+    check(
+      'ct handed on in Kelvin, not mired',
+      Math.round(state.ct) === 2597,
+      `${state.ct}`
+    );
+    check(
+      'and it converts back to the mired HomeKit gave us',
+      Math.floor(10 ** 6 / state.ct) === 385,
+      `${Math.floor(10 ** 6 / state.ct)}`
+    );
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }

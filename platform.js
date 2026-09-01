@@ -133,10 +133,22 @@ class YeePlatform {
       return service.getCharacteristic(characteristic).value;
     };
 
+    // HomeKit holds a colour temperature in mired; the lamp, and every path
+    // that starts from `props.ct`, speaks Kelvin. Handing the mired straight
+    // over had it inverted a second time on the way in - a remembered 385
+    // came back as 10^6/385 = 2597, which HomeKit then refused as far outside
+    // the 140-500 the characteristic allows.
+    const mired = value(Characteristic.ColorTemperature);
     const state = {
       power: value(Characteristic.On) ? 'on' : 'off',
       bright: value(Characteristic.Brightness),
-      ct: value(Characteristic.ColorTemperature),
+      // Rounded, because that is the shape the lamp itself reports a colour
+      // temperature in; an unrounded 2597.4 floors back to 384 mired and the
+      // lamp drifts a step every restart.
+      ct:
+        Number.isFinite(mired) && mired > 0
+          ? Math.round(10 ** 6 / mired)
+          : undefined,
       hue: value(Characteristic.Hue),
       sat: value(Characteristic.Saturation),
     };
