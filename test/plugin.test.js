@@ -1569,6 +1569,104 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 38
+  console.log('\n38. A nudge already in the window cannot end the mode');
+  {
+    const lamp = bedsideLamp('0');
+    await lamp.listen();
+    const { bulb, service, accessory } = await makeBulb(
+      lamp,
+      {},
+      { power: 'on', bright: '100', ct: '2415' }
+    );
+    const moonlight = moonlightSwitch(accessory);
+
+    // The 23:00 case, in order: Adaptive Lighting writes first and its command
+    // is still coalescing when the automation flips the switch a few
+    // milliseconds later.
+    await service
+      .getCharacteristic('ColorTemperature')
+      .write(300, { controller: {} });
+    await moonlight.getCharacteristic('On').write(true);
+    await sleep(400);
+
+    const m = lamp.methods();
+    check(
+      'the temperature never reaches the lamp',
+      !m.includes('set_ct_abx'),
+      `${m}`
+    );
+    check(
+      'only the mode does',
+      m.length === 1 && m[0] === 'set_power',
+      `${m.length}: ${m}`
+    );
+    check(
+      'the mode is still on a second later',
+      moonlight.getCharacteristic('On').value === true && bulb.nightMode,
+      `${moonlight.getCharacteristic('On').value}`
+    );
+    check(
+      'and the nudge is kept for the way out',
+      bulb.temperature === 300,
+      `${bulb.temperature}`
+    );
+
+    // Leaving puts the lamp on the curve as it stands now, not where it was.
+    lamp.reset();
+    await moonlight.getCharacteristic('On').write(false);
+    await sleep(300);
+    const out = lamp.received.find((r) => r.method === 'set_ct_abx');
+    check(
+      'the way out uses the nudge that was held back',
+      !!out && out.params[0] === Math.round(10 ** 6 / 300),
+      JSON.stringify(out && out.params)
+    );
+    check(
+      'and the brightness the lamp was lit at comes back',
+      lamp.received.some(
+        (r) => r.method === 'set_bright' && r.params[0] === 100
+      ),
+      JSON.stringify(lamp.received.map((r) => [r.method, r.params]))
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 39
+  console.log('\n39. A brightness in the window is taken as what to restore');
+  {
+    const lamp = bedsideLamp('0');
+    await lamp.listen();
+    const { bulb, service, accessory } = await makeBulb(
+      lamp,
+      {},
+      { power: 'on', bright: '100' }
+    );
+    const moonlight = moonlightSwitch(accessory);
+
+    await service.getCharacteristic('Brightness').write(40);
+    await moonlight.getCharacteristic('On').write(true);
+    await sleep(400);
+    check(
+      'the brightness never goes out',
+      !lamp.methods().includes('set_bright'),
+      `${lamp.methods()}`
+    );
+    check(
+      'and it becomes what the lamp comes back to',
+      bulb.moonlightSnapshot && bulb.moonlightSnapshot.bright === 40,
+      JSON.stringify(bulb.moonlightSnapshot)
+    );
+    check(
+      'the lamp was not woken at its power-on brightness either',
+      lamp.methods().length === 1 && lamp.methods()[0] === 'set_power',
+      `${lamp.methods()}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }

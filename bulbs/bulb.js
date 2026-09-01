@@ -521,6 +521,25 @@ class YeeBulb {
     return this.pending;
   }
 
+  // What is still waiting for the coalescing window to close, and a way to take
+  // it back. A mode change can make a value that arrived a moment earlier wrong
+  // before it has ever been sent: an Adaptive Lighting nudge and the night-mode
+  // switch landing in the same instant is exactly that, and the nudge would go
+  // out 80 ms later and end the mode the switch had just started.
+  pendingState() {
+    return this.desired || {};
+  }
+
+  discardPending(keys) {
+    const { desired } = this;
+    if (!desired) return;
+    keys.forEach((key) => delete desired[key]);
+    // Power was in that patch only to carry the values just dropped. An
+    // explicit On or Off from HomeKit carries `force` and stays; without this
+    // the flush would wake the lamp at its power-on brightness instead.
+    if (desired.power === true && !desired.force) delete desired.power;
+  }
+
   flush() {
     const { desired, settle } = this;
     this.desired = null;

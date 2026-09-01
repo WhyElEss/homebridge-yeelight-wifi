@@ -189,6 +189,20 @@ const MoonlightMode = (Device) =>
       // Claimed before the command goes out, and given back if it never lands.
       this.activeMode = MOONLIGHT_MODE;
 
+      // Guarding the writes that arrive after this point is not enough: one
+      // that arrived a few milliseconds earlier is already past the guard and
+      // waiting for its coalescing window to close. That is how a 23:00
+      // automation lost the two lamps that happened to be lit - an Adaptive
+      // Lighting nudge landed in the same instant as the switch, went out 80 ms
+      // behind it and put them straight back into daylight. Taken back here,
+      // and kept, so the way out still lands on the curve.
+      const pending = this.pendingState();
+      if (pending.ct !== undefined) this._temperature = pending.ct;
+      if (Number.isFinite(pending.bright)) {
+        this.moonlightSnapshot.bright = pending.bright;
+      }
+      this.discardPending(['ct', 'bright', 'hue', 'sat']);
+
       try {
         await this.sendCmd({
           method: 'set_power',

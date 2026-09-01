@@ -266,6 +266,8 @@ A lamp that has one gains a second control on the same accessory — a switch ca
 
 **Adaptive Lighting.** The mode's natural enemy: the firmware leaves night mode on any `set_ct_abx` or `set_bright`, including one that changes nothing, and a transition nudges the temperature about once a minute. Background nudges are swallowed while the mode is on — and recorded, so switching the mode off lands the lamp on the curve where it stands then. A deliberate write is a different thing and is obeyed: moving the brightness or temperature slider ends the mode, and takes the switch down with it in the same moment.
 
+Guarding the writes that arrive after the switch is not enough on its own: one that arrived a few milliseconds earlier is already past the guard and waiting for its coalescing window to close. An automation that put three lamps into night mode at 23:00 kept only the one that happened to be switched off, because the two that were lit each had a nudge in flight that went out 80 ms behind the switch. Entering the mode now takes back whatever is still in that window, and keeps the value.
+
 **The lamp is the authority.** `nl_br` arrives in the lamp's own property notifications, so a mode ended by the Yeelight app, by another controller or by a scene of ours takes the switch down within a second. A lamp that is switched off reports `nl_br: 0`, which means the switch clears itself when the light goes out.
 
 **Turning it off.** Every lamp that has the mode gets the switch; `moonlight: false` on a lamp takes it away again, from the settings form or the JSON. `blacklist: ["active_mode"]`, the older spelling, still says the same thing. A lamp whose switch is turned off is not even probed for the mode, which is one command less per launch.
