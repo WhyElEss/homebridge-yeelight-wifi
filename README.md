@@ -55,10 +55,12 @@ lamp after: [ 'on', '20', '2703', '2' ]
 
 **Reliability fixes**
 
+- The lamp announces every change it makes, our own included, and that announcement went straight to HomeKit. Mid-drag the lamp confirms the value it has reached while the finger is still moving towards a later one, so the tile snaps backwards and the gesture is cancelled: a slider dragged to 100% landed on 5%, then on 66%, and the pause each time read as the plugin being slow. Nothing was slow — HAP requests were answered in under 4 ms and no command ever timed out. What a command asks for is now recorded as it is queued, and an announcement reaches HomeKit only when it matches none of it — see [Whose change is it](#whose-change-is-it).
 - A lamp existed only once its announcement arrived. One of these lamps answers no search at all, so after a restart its accessory sat in HomeKit with nothing behind it: writes were accepted and dropped on the floor — the Home app showed the light switched on while the lamp stayed dark — and reads returned whatever the cache held. Lamps are now rebuilt from the accessory cache the moment Homebridge starts, from the endpoint and capabilities saved last time, and each one is asked for its real state in a single command. An announcement still relocates a lamp that moved.
 
 - Every write waited for the lamp to answer before telling HomeKit the write had been accepted — 105–170 ms against the 6–8 ms of a plugin that answers first and acts after. Homebridge's guidance is explicit: _return the callback instantly, and call `updateValue` once the action has completed_; a handler that thinks for too long is warned about at three seconds and abandoned at nine, and a colour wheel streams writes far faster than a lamp on Wi-Fi can answer. Handlers now accept the write, queue the command, and push the cached value back if it never lands.
 - Every HomeKit read of a lamp's `On` state went to the lamp over the LAN — one command out of the per-minute budget, and HomeKit blocked for the round trip. Reads are answered from the cache the announcements and property notifications already keep, with a refresh started behind the answer when it goes stale. A burst of reads used to queue up and leave the Home app spinning; the Homebridge log had 455 of them in a day.
+- Rebuilding a lamp from its accessory cache read the colour temperature out of the HomeKit characteristic, which holds mired, and handed it on as `props.ct`, which everything downstream reads as the lamp's Kelvin. The setter inverted it a second time: a remembered 385 came back as 10⁶/385 = 2597, far outside what the characteristic allows, so HomeKit rejected it and logged a warning for every lamp on every start.
 - The colour temperature range was advertised as 154–588 mired, but HomeKit defines the characteristic as 140–500. Adaptive Lighting computes its curve against exactly those bounds. HomeKit is now told 154–500; the lamp itself still goes wherever it always did.
 
 - Lamps were pinned to the address they were discovered at, so a new DHCP lease left one unreachable until Homebridge restarted. Announcements now update the endpoint — and the cached state, which costs nothing since the announcement already carries it.
@@ -180,6 +182,7 @@ How long, in milliseconds, the lamp takes to fade to a new value. Applies to the
 | `coalesce` | `80` | Window, in ms, over which characteristic writes are merged into one command. Raising it merges more; lowering it makes the lamp react sooner. |
 | `keepAlive` | `30000` | TCP keep-alive interval, so a half-open socket is noticed instead of swallowing commands. |
 | `staleAfter` | `60000` | How old the cached power state may get before a HomeKit read starts a refresh behind it. The read itself is always answered from memory. |
+| `echoWindow` | `4000` | How long a value we asked for is remembered, so the lamp's confirmation of it is recognised as our own and not pushed back at HomeKit. See [Whose change is it](#whose-change-is-it). |
 
 ### `devices`
 
@@ -276,6 +279,19 @@ Guarding the writes that arrive after the switch is not enough on its own: one t
 
 Cost on the wire: one command in, two out — the temperature and the brightness.
 
+## Whose change is it
+
+A Yeelight announces every change it makes on the open socket, without being asked. That is how this plugin knows a lamp was switched at its own touch panel, from the Yeelight app, or by a scene running on the lamp itself — and it is why HomeKit reads never have to travel to the lamp.
+
+The catch is that the lamp announces the changes _we_ asked for in exactly the same way. Handing those back to HomeKit is worse than useless: the controller already holds the value it asked for, and if someone is still moving a slider, the confirmation of a value they have already passed lands on top of the one they are heading for. The tile snaps backwards and the gesture is cancelled.
+
+So each command records what it claims, as it is queued — not when it completes, because the announcement can arrive in the same TCP read as the reply and is handled before the completion callback ever runs. An announcement is passed on to HomeKit only when both hold:
+
+- it does not match a value we asked for within the last `echoWindow` ms, and
+- no newer value for that property is still waiting to go out.
+
+A change from anywhere else matches nothing and goes straight through. The internal cache always follows the lamp either way; it is only the push to HomeKit that is held back.
+
 ## Where the switches live
 
 Both switches — the alert and the night mode — are services on the lamp's own accessory, beside the light itself. That is one accessory per lamp, whatever it can do.
@@ -300,7 +316,9 @@ Night mode has a group of its own: that a lamp is found to have it through `nl_b
 
 The alert has its own group: that flashing a lit lamp is a single `set_hsv`, that the restore reproduces the snapshot exactly and sends the power off in its own flush after the colour, that an Adaptive Lighting nudge arriving mid-alert never reaches the lamp but is still remembered for the restore, and that no characteristic is ever written — the one thing that would take Adaptive Lighting down.
 
-It earns its keep — it caught a socket being closed after it had already been replaced, which failed the command in flight on its successor and produced exactly the duplicate write this fork set out to remove.
+The lamp's fake can be told to announce its changes the way real firmware does, which is what the slider tests need: that a finger dragging brightness from 5 to 100 is never pushed backwards, that a change the plugin did not make still reaches HomeKit, and that a colour temperature remembered across a restart comes back as the same mired it went in as.
+
+It earns its keep — it caught a socket being closed after it had already been replaced, which failed the command in flight on its successor and produced exactly the duplicate write this fork set out to remove. The slider tests were written the same way: the fake lamp stayed silent until it was taught to answer back, and the bug appeared the moment it did.
 
 ## Developing
 
