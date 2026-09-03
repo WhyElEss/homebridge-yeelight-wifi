@@ -61,9 +61,12 @@ const clamp = (value, min, max) => {
 // the default, leaves the lamp waking wherever it was left.
 const resolvePowerOn = (entry) => {
   const powerOn = entry.powerOn || {};
+  // Clamping a zero straight into the lamp's range would turn "leave it as it
+  // was" into 1700 K, so the zero is read before the range is applied.
+  const kelvin = clamp(powerOn.kelvin, 0, 6500);
   return {
     brightness: clamp(powerOn.brightness, 0, 100) || undefined,
-    kelvin: clamp(powerOn.kelvin, 1700, 6500) || undefined,
+    kelvin: kelvin ? Math.max(kelvin, 1700) : undefined,
   };
 };
 

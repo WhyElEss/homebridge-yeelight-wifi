@@ -192,7 +192,7 @@ Per-lamp settings. A lamp that is not listed still works, on the platform defaul
 - `name` — the name shown in HomeKit. Defaults to `<model>-<id>`.
 - `hidden` — `true` keeps the lamp out of HomeKit entirely.
 - `blacklist` — capabilities to keep out of HomeKit for this lamp. Edited in the JSON editor rather than the settings form, which has no widget that renders a list like this legibly. The values are the lamp's own method names, which the settings form shows under readable titles: `set_bright` brightness, `set_hsv` colour, `set_ct_abx` colour temperature (hiding it also removes Adaptive Lighting), `active_mode` night mode, `bg_set_power` / `bg_set_bright` / `bg_set_hsv` the backlight.
-- `powerOn.brightness` — the brightness this lamp wakes at when it is switched on by hand, and `powerOn.kelvin` — the white it wakes at when no Adaptive Lighting transition is running. See [Waking a lamp](#waking-a-lamp).
+- `powerOn.brightness` — the brightness this lamp wakes at when it is switched on by hand, and `powerOn.kelvin` — the white it wakes at when no Adaptive Lighting transition is running. Zero, the default, means the last white the lamp knew; the settings form offers it alongside three named whites, 2700 K warm, 4000 K neutral and 5000 K daylight, and the JSON editor takes any value from 1700 to 6500. See [Waking a lamp](#waking-a-lamp).
 - `moonlight` — `false` keeps the night-mode switch off this lamp. Defaults to `true`, which means every lamp that turns out to have the mode gets one. See [Night mode](#night-mode-the-lamps-own-warm-dim-state).
 - `alert` — gives this lamp an alert switch and sets its colour. See [`devices[].alert`](#devicesalert).
 

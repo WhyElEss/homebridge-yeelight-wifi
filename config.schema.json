@@ -221,9 +221,25 @@
                   "title": "Colour temperature when switched on by hand",
                   "type": "integer",
                   "default": 0,
-                  "minimum": 1700,
-                  "maximum": 6500,
-                  "description": "Kelvin. Used when Adaptive Lighting is not running — while it is, the lamp wakes at the transition's current temperature instead. 0 wakes it at the last white temperature it knew. Warm white is around 2700, daylight around 5000."
+                  "oneOf": [
+                    {
+                      "title": "As it was left — the last white it knew",
+                      "enum": [0]
+                    },
+                    {
+                      "title": "Warm white — 2700 K",
+                      "enum": [2700]
+                    },
+                    {
+                      "title": "Neutral white — 4000 K",
+                      "enum": [4000]
+                    },
+                    {
+                      "title": "Cool daylight — 5000 K",
+                      "enum": [5000]
+                    }
+                  ],
+                  "description": "Used when Adaptive Lighting is not running — while it is, the lamp wakes at the transition's current temperature instead. Any Kelvin value between 1700 and 6500 also works when typed in the JSON editor."
                 }
               }
             }

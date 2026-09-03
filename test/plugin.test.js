@@ -564,6 +564,7 @@ async function run() {
       deviceEntry,
       resolveAlert,
       resolveMoonlight,
+      resolvePowerOn,
     } = require('../utils');
     const full = '0x000000001778cb4e';
     const keys = ['bslamp3-78cb4e', '78cb4e', full];
@@ -687,6 +688,22 @@ async function run() {
       'and it belongs to that lamp only',
       moonlightFor({ devices: [{ id: 'aaaaaa', moonlight: false }] }) === true,
       ''
+    );
+
+    check(
+      'a zero wake temperature means the last white the lamp knew',
+      resolvePowerOn({ powerOn: { kelvin: 0 } }).kelvin === undefined,
+      String(resolvePowerOn({ powerOn: { kelvin: 0 } }).kelvin)
+    );
+    check(
+      'a named wake temperature is kept as it was written',
+      resolvePowerOn({ powerOn: { kelvin: 4000 } }).kelvin === 4000,
+      String(resolvePowerOn({ powerOn: { kelvin: 4000 } }).kelvin)
+    );
+    check(
+      'a temperature below the lamp is lifted to 1700, not to nothing',
+      resolvePowerOn({ powerOn: { kelvin: 1000 } }).kelvin === 1700,
+      String(resolvePowerOn({ powerOn: { kelvin: 1000 } }).kelvin)
     );
 
     const clamped = resolveAlert({
