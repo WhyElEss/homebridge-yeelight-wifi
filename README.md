@@ -149,7 +149,9 @@ Full, with defaults shown:
         "connectTimeout": 5000,
         "quota": 55,
         "coalesce": 80,
-        "keepAlive": 30000
+        "keepAlive": 30000,
+        "staleAfter": 60000,
+        "echoWindow": 4000
       },
       "multicast": {
         "interface": "0.0.0.0"
@@ -159,6 +161,7 @@ Full, with defaults shown:
           "id": "0x000000001778cb4e",
           "name": "Kitchen",
           "powerOn": { "brightness": 100, "kelvin": 2700 },
+          "moonlight": true,
           "alert": { "enabled": true, "hue": 240, "saturation": 100 }
         }
       ]
@@ -258,7 +261,7 @@ An `alert` block at the platform level, which earlier versions of this fork read
 
 ## Night mode: the lamp's own warm dim state
 
-A lamp that has one gains a second control on the same accessory — a switch called **Moonlight Mode**, next to the light itself. Night mode is not a brightness and not a colour temperature: it is a state of the firmware, the lamp at its dimmest in a fixed warm amber (`#FF9000` on a `bslamp3`) that no combination of the two reproduces.
+A lamp that has one gains a second control on the same accessory — a switch named after it — `Entrance Night Light Moonlight`, next to the light itself. Night mode is not a brightness and not a colour temperature: it is a state of the firmware, the lamp at its dimmest in a fixed warm amber (`#FF9000` on a `bslamp3`) that no combination of the two reproduces.
 
 - Switching it **on** is a single `set_power` carrying the mode parameter the spec defines as _"5: turn on and switch to Night light mode"_. It lights a lamp that was off, and remembers the brightness the lamp was lit at.
 - Switching it **off** puts that brightness back, at the colour temperature the lamp should be at — the current point of a running Adaptive Lighting transition, if there is one. There is no separate command for leaving the mode: any temperature or brightness command ends it, so the restore is the way out.
