@@ -28,7 +28,6 @@ const MoonlightMode = (Device) =>
   class extends Device {
     constructor(props, platform) {
       super(props, platform);
-      this.lastMoonlightRead = 0;
       this.activeMode = DAYLIGHT_MODE;
       // The command taking the lamp into or out of the mode, while it is on
       // the wire. Repeats of the same tap wait on it instead of adding to it.
@@ -82,16 +81,18 @@ const MoonlightMode = (Device) =>
       characteristic.removeAllListeners?.('get');
       characteristic
         .on('set', (value, callback) => {
+          this.heard('Moonlight', value);
           this.accepted(this.setMoonlightMode(value), () =>
             this.publishMoonlightState()
           );
           callback(null);
         })
         // From memory, like every other read: a read that goes to the lamp
-        // costs a command and blocks HomeKit while it travels.
+        // costs a command and blocks HomeKit while it travels. The refresh is
+        // the lamp's one shared read, which asks for the mode as well.
         .on('get', (callback) => {
           callback(null, this.nightMode);
-          this.refreshMoonlightInBackground();
+          this.refreshPowerInBackground();
         })
         .updateValue(this.nightMode);
     }
@@ -118,6 +119,9 @@ const MoonlightMode = (Device) =>
     nightModeEnded() {
       this.moonlightSnapshot = null;
       if (!this.nightMode) return;
+      // The write on its way has to go out as set_ct_abx or set_bright, the
+      // commands verified to end the mode, not merged into a set_scene.
+      this.leavingNightMode = true;
       this.log.debug(
         `${this.tag}: night mode ends, a deliberate write is on its way.`
       );
@@ -132,23 +136,10 @@ const MoonlightMode = (Device) =>
         .updateValue(this.nightMode);
     }
 
-    refreshMoonlightInBackground() {
-      if (!this.moonlightProp) return;
-      const now = Date.now();
-      if (now - this.lastMoonlightRead < this.staleAfter) return;
-      this.lastMoonlightRead = now;
-      this.getProperty([this.moonlightProp])
-        .then(([value]) => {
-          if (value === undefined || value === '') return;
-          this.updateStateFromProp(this.moonlightProp, value);
-        })
-        .catch((err) => {
-          this.log.debug(
-            `${this.tag}: background moonlight refresh failed: ${
-              err.message || err
-            }.`
-          );
-        });
+    // The lamp's shared background read asks for the mode in the same command.
+    backgroundProps() {
+      const props = super.backgroundProps();
+      return this.moonlightProp ? props.concat(this.moonlightProp) : props;
     }
 
     // HomeKit can deliver the same tap more than once - a switch inside a
@@ -265,6 +256,8 @@ const MoonlightMode = (Device) =>
         return;
       }
 
+      // Out by the commands verified to end the mode, not a set_scene.
+      this.leavingNightMode = true;
       await this.applyState(patch);
       this.reflect(reflected);
       this.log.debug(

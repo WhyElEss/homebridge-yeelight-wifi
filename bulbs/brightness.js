@@ -9,6 +9,7 @@ const Brightness = (Device) =>
         this.service.addCharacteristic(global.Characteristic.Brightness)
       )
         .on('set', (value, callback) => {
+          this.heard('Brightness', value);
           this.accepted(this.setBrightness(value), () =>
             this.service
               .getCharacteristic(global.Characteristic.Brightness)
@@ -35,6 +36,8 @@ const Brightness = (Device) =>
       // into the set_scene that woke it. Dragging to the bottom put the lamp
       // back on at 1%, which is how this was found.
       if (!(Number(brightness) > 0)) {
+        // As much an Off as one written to On - see OFF_TAIL in bulb.js.
+        this.offAt = Date.now();
         return this.applyState({ power: false, force: true });
       }
 

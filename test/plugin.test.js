@@ -917,7 +917,7 @@ async function run() {
     if (!moonlight) {
       check('a moonlight switch exists to read', false, 'no switch service');
     } else {
-      bulb.lastMoonlightRead = Date.now();
+      bulb.lastPowerRead = Date.now();
       await moonlight.getCharacteristic('On').read();
       await sleep(150);
       check(
@@ -1814,6 +1814,269 @@ async function run() {
       Math.floor(10 ** 6 / state.ct) === 385,
       `${Math.floor(10 ** 6 / state.ct)}`
     );
+  }
+
+  // The lamp's own word on an open socket, which is what makes the cache sure.
+  const lampSays = (bulb, params) =>
+    bulb.stateHandler({ method: 'props', params });
+
+  // What HAP does with every brightness change while Adaptive Lighting is on
+  // (AdaptiveLightingController.handleAdjustmentFactorChanged in HAP-NodeJS
+  // 2.2.2): a colour temperature write of its own, with the controller as
+  // context.
+  const AL = { controller: {} };
+  const alActive = (bulb) => {
+    bulb.controller = { isAdaptiveLightingActive: () => true };
+  };
+  const dragStep = (service, bright, mired, withOn) =>
+    Promise.all([
+      withOn ? service.getCharacteristic('On').write(true) : null,
+      service.getCharacteristic('Brightness').write(bright),
+      service.getCharacteristic('ColorTemperature').write(mired, AL),
+    ]);
+
+  // ---------------------------------------------------------------- 50
+  console.log('\n50. A slider step on a lit lamp is one command');
+  {
+    const lamp = new FakeLamp({ delay: 90 });
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(lamp, {}, { power: 'on' });
+    alActive(bulb);
+    lampSays(bulb, { power: 'on' });
+    // What the log showed on 2026-10-10 at 20:41:54: On + Brightness + the
+    // Adaptive Lighting temperature, for every step of the drag.
+    await dragStep(service, 84, 412, true);
+    await sleep(300);
+    const wire = lamp.received.map((r) => [r.method, r.params]);
+    console.log('     wire:', JSON.stringify(wire));
+    check('one command, not three', wire.length === 1, `${wire.length}`);
+    check(
+      'a set_scene carrying both values',
+      wire[0] &&
+        JSON.stringify(wire[0]) ===
+          JSON.stringify(['set_scene', ['ct', 2427, 84]]),
+      JSON.stringify(wire[0])
+    );
+    check(
+      'no set_power for a lamp the lamp itself says is on',
+      !lamp.methods().includes('set_power'),
+      `${lamp.methods()}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 51
+  console.log(
+    "\n51. An On is still sent when the cache is not the lamp's word"
+  );
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(lamp, {}, { power: 'on' });
+    lampSays(bulb, { power: 'on' });
+    // The socket goes; whatever happened meanwhile was not heard.
+    bulb.reset();
+    await scene(service, { On: true });
+    await sleep(200);
+    check(
+      'set_power goes out after a reconnect',
+      lamp.methods().join() === 'set_power',
+      `${lamp.methods()}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 52
+  console.log(
+    '\n52. A fast drag never leaves the lamp more than a step behind'
+  );
+  {
+    const lamp = new FakeLamp({ delay: 250 });
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(lamp, {}, { power: 'on' });
+    alActive(bulb);
+    lampSays(bulb, { power: 'on' });
+    const started = Date.now();
+    // Twenty steps, one every 40 ms: faster than the lamp answers.
+    for (let b = 100; b > 20; b -= 4) {
+      // eslint-disable-next-line no-await-in-loop
+      await dragStep(service, b, 300 + (100 - b), true);
+      // eslint-disable-next-line no-await-in-loop
+      await sleep(40);
+    }
+    const dragged = Date.now() - started;
+    await sleep(800);
+    const wire = lamp.received.map((r) => [r.method, r.params]);
+    console.log(
+      `     ${wire.length} commands for 20 steps over ${dragged} ms:`,
+      JSON.stringify(wire.map(([, p]) => p[2]))
+    );
+    check(
+      'the lamp got far fewer commands than steps',
+      wire.length <= 6,
+      `${wire.length}`
+    );
+    const last = wire[wire.length - 1];
+    check(
+      'and the last one is where the finger stopped',
+      last && last[1][2] === 24,
+      JSON.stringify(last)
+    );
+    check(
+      'nothing left waiting once the lamp has answered',
+      !bulb.pending && !bulb.inflight,
+      `pending=${!!bulb.pending} inflight=${!!bulb.inflight}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 53
+  console.log('\n53. A step that arrives after the Off does not wake the lamp');
+  {
+    const lamp = new FakeLamp({ delay: 90 });
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(lamp, {}, { power: 'on' });
+    alActive(bulb);
+    lampSays(bulb, { power: 'on' });
+    // The order the wire showed at 20:45:49: the Off first, then the 41%
+    // the finger had passed on its way down.
+    await service.getCharacteristic('On').write(false);
+    await sleep(250);
+    await dragStep(service, 41, 452, false);
+    await sleep(400);
+    const wire = lamp.received.map((r) => [r.method, r.params]);
+    console.log('     wire:', JSON.stringify(wire));
+    check(
+      'only the Off reached the lamp',
+      JSON.stringify(wire) ===
+        JSON.stringify([['set_power', ['off', 'smooth', 400]]]),
+      JSON.stringify(wire)
+    );
+    check('the lamp is off', bulb.power === false, `${bulb.power}`);
+    check(
+      'and HomeKit says so',
+      service.getCharacteristic('On').value === false,
+      `${service.getCharacteristic('On').value}`
+    );
+    check('the 41% is kept', bulb.bright === 41, `${bulb.bright}`);
+
+    // A deliberate change of mind still works: an On ends the tail at once.
+    lamp.reset();
+    await scene(service, { On: true, Brightness: 60 });
+    await sleep(300);
+    check(
+      'an explicit On wakes it straight away',
+      lamp.methods().join() === 'set_scene',
+      `${lamp.methods()}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 54
+  console.log(
+    '\n54. The tail ends: a later brightness wakes the lamp as before'
+  );
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(lamp, {}, { power: 'on' });
+    await service.getCharacteristic('On').write(false);
+    await sleep(150);
+    bulb.offAt = Date.now() - 2500;
+    lamp.reset();
+    await service.getCharacteristic('Brightness').write(30);
+    await sleep(200);
+    check(
+      'woken by set_scene',
+      lamp.methods().join() === 'set_scene',
+      `${lamp.methods()}`
+    );
+    check(
+      'and HomeKit is told it is on, which it never asked for',
+      service.getCharacteristic('On').value === true,
+      `${service.getCharacteristic('On').value}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 55
+  console.log('\n55. Brightness 0 switches the tile off, not just the lamp');
+  {
+    const lamp = new FakeLamp({ echo: true });
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(lamp, {}, { power: 'on' });
+    service.getCharacteristic('On').updateValue(true);
+    await service.getCharacteristic('Brightness').write(0);
+    await sleep(300);
+    check(
+      'set_power off on the wire',
+      lamp.methods().join() === 'set_power',
+      `${lamp.methods()}`
+    );
+    check(
+      'HomeKit On follows, though only Brightness was written',
+      service.getCharacteristic('On').value === false,
+      `${service.getCharacteristic('On').value}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 56
+  console.log('\n56. Opening the Home app costs one read per lamp, not two');
+  {
+    const lamp = new FakeLamp({ props: { power: 'on', nl_br: '0' } });
+    await lamp.listen();
+    const { bulb, service, accessory } = await makeBulb(lamp);
+    lamp.reset();
+    bulb.lastPowerRead = 0;
+    await service.getCharacteristic('On').read();
+    await moonlightSwitch(accessory).getCharacteristic('On').read();
+    await sleep(200);
+    const wire = lamp.received.map((r) => [r.method, r.params]);
+    check(
+      'a single get_prop for power and night mode',
+      JSON.stringify(wire) ===
+        JSON.stringify([['get_prop', ['power', 'nl_br']]]),
+      JSON.stringify(wire)
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 57
+  console.log('\n57. Leaving night mode by the slider stays off set_scene');
+  {
+    const lamp = new FakeLamp({ props: { active_mode: '', nl_br: '1' } });
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(lamp, {}, { power: 'on' });
+    alActive(bulb);
+    lampSays(bulb, { power: 'on' });
+    check('starts in night mode', bulb.nightMode === true, `${bulb.nightMode}`);
+    lamp.reset();
+    await service.getCharacteristic('Brightness').write(60);
+    await service.getCharacteristic('ColorTemperature').write(370);
+    await sleep(300);
+    check(
+      'the verified commands, not a scene',
+      lamp.methods().join() === 'set_ct_abx,set_bright',
+      `${lamp.methods()}`
+    );
+    lamp.reset();
+    await dragStep(service, 70, 380, false);
+    await sleep(300);
+    check(
+      'once out, the next step is a single scene again',
+      lamp.methods().join() === 'set_scene',
+      `${lamp.methods()}`
+    );
+    bulb.reset();
+    await lamp.close();
   }
 
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);

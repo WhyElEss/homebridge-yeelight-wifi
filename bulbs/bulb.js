@@ -4,6 +4,16 @@ const { id: nextCmdId, sleep } = require('../utils');
 const MINUTE = 60000;
 // A single stray chunk should never be able to grow the read buffer forever.
 const MAX_BUFFER = 65536;
+// How long after HomeKit switches a lamp off a write that would wake it is
+// read as the tail of the same gesture rather than a new request. On
+// 2026-10-10 a drag to zero reached the plugin as an Off followed, within the
+// same second, by the 41% the finger had passed on the way down; the Off went
+// out, then the 41% lit the lamp again - while the Home app, having sent the
+// Off last, showed it as off at 41%.
+const OFF_TAIL = 2000;
+// A reply slower than this is worth a line in the log: the lamps answer in
+// 30-240 ms when they are well.
+const SLOW_REPLY = 500;
 
 class YeeBulb {
   constructor(props, platform) {
@@ -60,9 +70,27 @@ class YeeBulb {
     this.pending = null;
     this.settle = null;
     this.flushTimer = null;
+    // The flush whose commands are on the wire. Only one at a time: a slider
+    // streams writes faster than a lamp on Wi-Fi answers them, and queueing
+    // every step behind the last is how the lamp ended up seconds behind the
+    // finger. What arrives meanwhile gathers in `desired` and goes out as one.
+    this.inflight = null;
+    // Set by the moonlight mixin while a write that ends night mode is
+    // gathering; read and cleared by the flush that sends it.
+    this.leavingNightMode = false;
+    // When HomeKit last asked for this lamp to be off - see OFF_TAIL.
+    this.offAt = 0;
+    // When HomeKit last wrote anything, so the log can show the gaps.
+    this.lastHeard = 0;
 
     // The advertisement we were built from already carries the live state.
     this.power = props.power;
+    // Whether `power` is the lamp's own word, heard on a socket that has been
+    // open ever since. The lamp reports every change to every open connection,
+    // so while that holds the cache cannot be wrong and an On for a lamp that
+    // is already on needs no command. A closed socket may have missed a
+    // change, and the next explicit On goes to the lamp again.
+    this.powerSure = false;
 
     // What a bare "on" means for this lamp - see applyPowerOnDefaults.
     this.powerOn = props.powerOn || {};
@@ -89,6 +117,7 @@ class YeeBulb {
     this.service
       .getCharacteristic(global.Characteristic.On)
       .on('set', (value, callback) => {
+        this.heard('On', value);
         this.accepted(this.setPower(value), () =>
           this.service
             .getCharacteristic(global.Characteristic.On)
@@ -119,6 +148,18 @@ class YeeBulb {
     return `${this.name} (${this.host})`;
   }
 
+  // One line per write from HomeKit, with the gap since the previous one.
+  // Homebridge stamps its log to the second, and the order and spacing of
+  // writes within a second is exactly what a gesture is made of.
+  heard(characteristic, value) {
+    const now = Date.now();
+    const gap = this.lastHeard ? now - this.lastHeard : 0;
+    this.lastHeard = now;
+    this.log.info(
+      `${this.tag}: HomeKit set ${characteristic}=${value} (+${gap} ms).`
+    );
+  }
+
   // HomeKit is told a write was accepted as soon as it is queued, rather than
   // when the lamp confirms it. Homebridge's own guidance is to "return the
   // callback() instantly, and call updateValue once the action has completed":
@@ -137,21 +178,31 @@ class YeeBulb {
     });
   }
 
-  // At most one refresh a minute, and never one that HomeKit waits on.
+  // At most one refresh a minute, and never one that HomeKit waits on. Opening
+  // the Home app reads every switch on the lamp at once; each of them asking
+  // separately used to put two commands ahead of whatever the finger did next.
   refreshPowerInBackground() {
     const now = Date.now();
     if (now - this.lastPowerRead < this.staleAfter) return;
     this.lastPowerRead = now;
-    this.getProperty(['power'])
-      .then(([value]) => {
-        if (value === undefined) return;
-        this.updateStateFromProp('power', value);
+    const props = this.backgroundProps();
+    this.getProperty(props)
+      .then((values) => {
+        props.forEach((prop, i) => {
+          if (values[i] === undefined || values[i] === '') return;
+          this.updateStateFromProp(prop, values[i]);
+        });
       })
       .catch((err) => {
         this.log.debug(
           `${this.tag}: background power refresh failed: ${err.message || err}.`
         );
       });
+  }
+
+  // Extended by the moonlight mixin.
+  backgroundProps() {
+    return ['power'];
   }
 
   get endpoint() {
@@ -261,6 +312,7 @@ class YeeBulb {
         if (this.sock === sock) {
           this.sock = null;
           this.connected = false;
+          this.powerSure = false;
           this.failPending(new Error(`${this.host} closed the connection`));
         }
         finish(new Error('connection closed'));
@@ -281,6 +333,7 @@ class YeeBulb {
     this.sock = null;
     this.connected = false;
     this.connecting = null;
+    this.powerSure = false;
     if (sock && !sock.destroyed) sock.destroy();
     // Done here rather than from the close handler, which can no longer tell
     // that this socket was the current one.
@@ -334,6 +387,11 @@ class YeeBulb {
     delete this.cmds[message.id];
     clearTimeout(cmd.timeout);
 
+    const took = Date.now() - cmd.at;
+    if (took > SLOW_REPLY) {
+      this.log.info(`${this.tag}: cmd ${message.id} answered in ${took} ms.`);
+    }
+
     if ('result' in message) {
       this.log.debug(`${this.tag}: ${JSON.stringify(message)}`);
       cmd.resolve(message.result);
@@ -360,6 +418,7 @@ class YeeBulb {
       return;
     }
     this.power = value;
+    this.powerSure = this.connected;
     if (!this.publishable('power', value)) return;
     this.service
       .getCharacteristic(global.Characteristic.On)
@@ -449,7 +508,7 @@ class YeeBulb {
       }, this.timeout);
 
       // Registered before the write so a fast reply cannot arrive first.
-      this.cmds[cmd.id] = { resolve, reject, timeout };
+      this.cmds[cmd.id] = { resolve, reject, timeout, at: Date.now() };
       this.sent.push(Date.now());
 
       this.sock.write(msg + global.EOL, (err) => {
@@ -515,6 +574,18 @@ class YeeBulb {
       delete next.power;
     }
 
+    // Nor may one that lands just after it, when the Off has already gone
+    // out - see OFF_TAIL. The values are kept; only the waking is dropped.
+    const sinceOff = Date.now() - this.offAt;
+    if (next.power === true && !next.force && sinceOff < OFF_TAIL) {
+      delete next.power;
+      this.log.info(
+        `${this.tag}: ${JSON.stringify(
+          next
+        )} came ${sinceOff} ms after HomeKit switched the lamp off - not waking it.`
+      );
+    }
+
     this.desired = Object.assign(desired, next);
 
     if (!this.pending) {
@@ -549,11 +620,17 @@ class YeeBulb {
   }
 
   flush() {
+    this.flushTimer = null;
+    // Still waiting on the lamp: everything asked for since keeps gathering
+    // and goes out the moment the flush on the wire lands. However fast the
+    // writes come, the lamp is never more than one round-trip behind the last
+    // of them, and the values a finger has already moved past are never sent.
+    if (this.inflight) return;
+
     const { desired, settle } = this;
     this.desired = null;
     this.pending = null;
     this.settle = null;
-    this.flushTimer = null;
 
     if (!settle) return;
     if (!desired) {
@@ -577,7 +654,23 @@ class YeeBulb {
       return this.enqueue(cmd).then(commit);
     });
     runs.forEach((run) => run.catch(() => {}));
-    Promise.all(runs).then(() => settle.resolve(), settle.reject);
+    const inflight = Promise.all(runs);
+    this.inflight = inflight;
+    const landed = () => {
+      this.inflight = null;
+      // Whatever gathered meanwhile and has no timer of its own goes now.
+      if (this.pending && !this.flushTimer) this.flush();
+    };
+    inflight.then(
+      () => {
+        settle.resolve();
+        landed();
+      },
+      (err) => {
+        settle.reject(err);
+        landed();
+      }
+    );
   }
 
   noteCommanded(values) {
@@ -622,9 +715,7 @@ class YeeBulb {
             params: ['off', 'smooth', powerTransition],
           },
           echo: { power: 'off' },
-          commit: () => {
-            this.power = 'off';
-          },
+          commit: () => this.poweredBy('off'),
         },
       ];
     }
@@ -636,26 +727,45 @@ class YeeBulb {
     const hasTemperature = desired.ct !== undefined;
     const hasBrightness = desired.bright !== undefined;
 
-    // Waking a lamp: one set_scene carries power, colour and brightness
-    // together, where this used to cost three or four separate commands.
-    if (
-      wantsOn &&
-      !this.power &&
-      (hasColor || hasTemperature || hasBrightness)
-    ) {
+    // A lamp that is off and is not being woken has nothing to take: the
+    // spec accepts set_bright, set_ct_abx and set_hsv only while it is on. The
+    // values are kept for when it is.
+    if (!wantsOn && !this.power) {
+      this.remember(desired);
+      return [];
+    }
+
+    // Leaving night mode is done by set_ct_abx and set_bright, which are
+    // verified to end it on these lamps; set_scene is not, so it is kept out.
+    const leavingNight = this.leavingNightMode;
+    this.leavingNightMode = false;
+
+    // One set_scene where there would be several commands. Waking a lamp it
+    // carries power, colour and brightness together. On a lamp that is lit it
+    // replaces set_ct_abx plus set_bright - which is every step of a
+    // brightness slider while Adaptive Lighting is on, since HAP answers each
+    // brightness change with a colour temperature write of its own. Half the
+    // commands is half the time the lamp spends behind the finger.
+    const wake =
+      wantsOn && !this.power && (hasColor || hasTemperature || hasBrightness);
+    const combined =
+      !leavingNight && hasBrightness && (hasColor || hasTemperature);
+    if (wake || combined) {
       const scene = this.sceneFor(desired);
       if (scene) return [scene];
     }
 
     const steps = [];
 
-    if (wantsOn && (!this.power || desired.force)) {
+    // An explicit On is still sent to a lamp the cache believes is on, unless
+    // the lamp itself said so on a socket that has stayed open since. The
+    // Home app sends On with many brightness writes, and each of those used
+    // to cost a set_power the lamp did not need.
+    if (wantsOn && (!this.power || (desired.force && !this.powerSure))) {
       steps.push({
         cmd: { method: 'set_power', params: ['on', 'smooth', powerTransition] },
         echo: { power: 'on' },
-        commit: () => {
-          this.power = 'on';
-        },
+        commit: () => this.poweredBy('on'),
       });
     }
 
@@ -788,7 +898,7 @@ class YeeBulb {
         cmd: { method: 'set_scene', params: ['hsv', hue, sat, level] },
         echo: { power: 'on', hue, sat, bright: level },
         commit: () => {
-          this.power = 'on';
+          this.poweredBy('on');
           this._hue = hue;
           this._sat = sat;
           this._bright = level;
@@ -804,7 +914,7 @@ class YeeBulb {
       cmd: { method: 'set_scene', params: ['ct', kelvin, level] },
       echo: { power: 'on', ct: kelvin, bright: level },
       commit: () => {
-        this.power = 'on';
+        this.poweredBy('on');
         this._temperature = mired;
         this._bright = level;
         this.colorMode = 2;
@@ -839,7 +949,31 @@ class YeeBulb {
     });
   }
 
+  // A command of ours changed the lamp's power. HomeKit hears about it here,
+  // because it will not hear it from the lamp: the lamp's announcement is our
+  // own echo and is held back. That is right when HomeKit asked for the change
+  // with On, and wrong when it came from Brightness - a drag to zero switched
+  // the lamp off while the tile went on showing it lit, and a brightness write
+  // that woke a lamp left the tile saying "Powered Off" over a lamp that was
+  // on. updateValue sends nothing when the value is already the same.
+  poweredBy(state) {
+    this.power = state;
+    this.powerSure = this.connected;
+    this.reflect({ On: this.power });
+  }
+
+  // Values for a lamp that is off and staying off, kept for when it wakes.
+  remember(desired) {
+    if (desired.bright !== undefined) this._bright = Number(desired.bright);
+    if (desired.ct !== undefined) this._temperature = desired.ct;
+    if (desired.hue !== undefined) this._hue = Number(desired.hue);
+    if (desired.sat !== undefined) this._sat = Number(desired.sat);
+  }
+
   setPower(power) {
+    // A later write that would wake the lamp is weighed against this - see
+    // OFF_TAIL. An explicit On ends that at once.
+    this.offAt = power ? 0 : Date.now();
     // `force` keeps an explicit HomeKit write authoritative even when our
     // cached state disagrees with the lamp.
     return this.applyState({ power: !!power, force: true });

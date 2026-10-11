@@ -12,6 +12,7 @@ const Color = (Device) =>
         this.service.addCharacteristic(Hue)
       )
         .on('set', (value, callback) => {
+          this.heard('Hue', value);
           this.accepted(this.setColor(value, null), () =>
             this.service.getCharacteristic(Hue).updateValue(this.hue)
           );
@@ -24,6 +25,7 @@ const Color = (Device) =>
         this.service.addCharacteristic(Saturation)
       )
         .on('set', (value, callback) => {
+          this.heard('Saturation', value);
           this.accepted(this.setColor(null, value), () =>
             this.service.getCharacteristic(Saturation).updateValue(this.sat)
           );

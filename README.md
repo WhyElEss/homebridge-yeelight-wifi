@@ -295,6 +295,19 @@ So each command records what it claims, as it is queued — not when it complete
 
 A change from anywhere else matches nothing and goes straight through. The internal cache always follows the lamp either way; it is only the push to HomeKit that is held back.
 
+One exception: a change of **power** that HomeKit did not ask for with `On` is pushed by the plugin itself the moment its command lands. A brightness of zero switches a lamp off, and a brightness written to a lamp that is off wakes it; in both cases HomeKit's own `On` never moved, and with the lamp's announcement held back as our echo the tile went on showing the old state over a lamp that had changed.
+
+## Sliders
+
+A brightness slider in the Home app writes many times a second, and while Adaptive Lighting is on HAP answers every brightness change with a colour temperature write of its own (`AdaptiveLightingController.handleAdjustmentFactorChanged`). The Home app often sends `On` with each step as well. Taken one by one that was three commands a step — `set_power`, `set_ct_abx`, `set_bright` — queued behind each other at roughly 90 ms a reply, so a long drag left the lamp seconds behind the finger. Now:
+
+- **The latest value wins.** A lamp has at most one batch of commands on the wire. Whatever HomeKit writes meanwhile is merged and goes out as one the moment the lamp answers, so the lamp is never more than one round-trip behind the last write, and values the finger has already passed are never sent.
+- **One command a step.** Brightness together with a colour temperature or colour on a lit lamp is a single `set_scene`, and an `On` for a lamp that is already on costs nothing — provided the lamp itself said it was on, over a socket that has stayed open since. The lamp reports every change to every open connection (spec §4.3), so while that holds the cache cannot be wrong; after a reconnect the next `On` goes to the lamp again. A `set_scene` changes the lamp at once rather than over the brightness transition, which during a drag is what you want. Leaving night mode is the exception and still goes out as `set_ct_abx` and `set_bright`, the commands verified to end it.
+- **The tail of a gesture does not undo it.** A write that would wake a lamp, arriving within 2 s of HomeKit switching it off, is kept but does not wake it. Dragging to zero once reached the plugin as the Off followed by the 41% the finger had passed on the way down: the Off went out, then the 41% lit the lamp again, while the Home app — whose last word was the Off — showed it off at 41%. An explicit `On` ends that window at once.
+- **One read per lamp.** Opening the Home app reads the light and its switches together; the background refresh asks for power and night mode in a single `get_prop`.
+
+Every write from HomeKit is logged with the gap since the previous one (`HomeKit set Brightness=41 (+120 ms)`), and any reply slower than 500 ms gets a line of its own. Homebridge stamps its log to the second, and the order and spacing of writes within a second is what a gesture is made of.
+
 ## Where the switches live
 
 Both switches — the alert and the night mode — are services on the lamp's own accessory, beside the light itself. That is one accessory per lamp, whatever it can do.

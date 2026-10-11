@@ -37,6 +37,7 @@ const Temperature = (Device) =>
             typeof context === 'object' &&
             context !== null &&
             'controller' in context;
+          if (!fromAdaptiveLighting) this.heard('ColorTemperature', value);
 
           this.accepted(this.setTemperature(value, fromAdaptiveLighting), () =>
             this.service
