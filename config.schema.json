@@ -66,6 +66,13 @@
             "default": 5000,
             "minimum": 500
           },
+          "recoverWithin": {
+            "title": "Wait for a Lamp to Come Back (ms)",
+            "type": "integer",
+            "default": 15000,
+            "minimum": 0,
+            "description": "How long an unanswered command keeps waiting for its lamp to rejoin Wi-Fi before it is given up. A lamp sometimes drops off the network as a command reaches it and is back 6-8 s later."
+          },
           "quota": {
             "title": "Commands per minute",
             "type": "integer",
@@ -309,6 +316,7 @@
         "connection.timeout",
         "connection.retries",
         "connection.connectTimeout",
+        "connection.recoverWithin",
         "connection.quota",
         "connection.coalesce",
         "connection.keepAlive",

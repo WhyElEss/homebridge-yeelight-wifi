@@ -55,6 +55,12 @@ class YeeBulb {
     // between the reads that ask for it anyway.
     this.lastPowerRead = 0;
     this.staleAfter = (this.config.connection || {}).staleAfter ?? 60000;
+    // How long a command that went unanswered keeps waiting for its lamp to
+    // come back before it is given up. A lamp sometimes takes a command, drops
+    // off Wi-Fi without carrying it out, and rejoins the access point 6-8 s
+    // later - in the logs, about one wake from off in five. A retry that gave
+    // up at 7 s lost the command every time.
+    this.recoverWithin = (this.config.connection || {}).recoverWithin ?? 15000;
     // The lamp announces every change it makes, our own included. Handing that
     // echo back to HomeKit is how a slider gets pulled out from under a
     // finger: the lamp confirms the value it has reached while the person is
@@ -455,6 +461,7 @@ class YeeBulb {
   async dispatch(cmd) {
     cmd.id = nextCmdId.next().value;
     const msg = JSON.stringify(cmd);
+    const deadline = Date.now() + this.recoverWithin;
 
     for (let attempt = 0; attempt <= this.retries; attempt += 1) {
       try {
@@ -466,11 +473,6 @@ class YeeBulb {
         return await this.write(cmd, msg);
       } catch (err) {
         const code = (err && (err.code || err.message)) || 'unknown';
-
-        if (code === 'EHOSTUNREACH' || code === 'ENETUNREACH') {
-          this.log.error(`${this.tag}: unreachable, dropping cmd ${cmd.id}.`);
-          throw err;
-        }
 
         // Whatever went wrong, the socket is suspect. Re-sending on it is what
         // burned through the quota before, so always start a fresh one.
@@ -486,14 +488,39 @@ class YeeBulb {
         }
 
         this.log.warn(
-          `${this.tag}: cmd ${cmd.id} failed (${code}), retrying once on a new connection.`
+          `${this.tag}: cmd ${cmd.id} failed (${code}), waiting for the lamp to come back.`
         );
+        // An unreachable host used to drop the command on the spot. It is
+        // what a lamp looks like while it rejoins the access point, so it is
+        // waited out like any other failure.
         // eslint-disable-next-line no-await-in-loop
-        await sleep(200);
+        await this.reconnectBefore(deadline, cmd.id);
       }
     }
 
     throw new Error(`${this.tag}: cmd ${cmd.id} exhausted its retries`);
+  }
+
+  // Connection attempts cost nothing against the command quota, so the lamp
+  // is knocked on until it answers or the deadline passes. The command goes
+  // out again once, on the connection that answered.
+  async reconnectBefore(deadline, id) {
+    const started = Date.now();
+    for (;;) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await this.connect();
+        this.log.info(
+          `${this.tag}: back after ${Date.now() - started} ms, resending cmd ${id}.`
+        );
+        return;
+      } catch (err) {
+        this.reset();
+        if (Date.now() + 500 >= deadline) return;
+        // eslint-disable-next-line no-await-in-loop
+        await sleep(500);
+      }
+    }
   }
 
   write(cmd, msg) {

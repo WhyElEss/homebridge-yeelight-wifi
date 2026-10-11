@@ -2079,6 +2079,76 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 58
+  console.log(
+    '\n58. A lamp that drops off Wi-Fi mid-command gets it on return'
+  );
+  {
+    // Measured on the Entrance lamp 2026-10-11 16:24:24: it took a wake
+    // command, went silent - no reply, no ping - and rejoined the access
+    // point 8 s later without having carried it out. Played here as a lamp
+    // that swallows the command, vanishes, and is back 1.5 s later.
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { bulb } = await makeBulb(lamp, {
+      connection: { timeout: 300, connectTimeout: 300, recoverWithin: 4000 },
+    });
+    const port = lamp.port;
+    lamp.reset();
+    // It takes the command and says nothing...
+    lamp.silent = true;
+    const started = Date.now();
+    const pending = bulb.getProperty(['power']).then(
+      () => 'ok',
+      () => 'failed'
+    );
+    // ...then is off the network: no handshake completes until it is back.
+    await sleep(50);
+    await lamp.close();
+    await sleep(1450);
+    const back = new FakeLamp();
+    await back.listen(port);
+    const result = await pending;
+    const elapsed = Date.now() - started;
+    const writes = [lamp, back]
+      .map((l) => l.methods().filter((x) => x === 'get_prop').length)
+      .reduce((x, y) => x + y, 0);
+    console.log(`     result=${result} writes=${writes} elapsed=${elapsed}ms`);
+    check(
+      'the command arrived once the lamp was back',
+      result === 'ok',
+      result
+    );
+    check('it cost exactly one extra write', writes === 2, `${writes}`);
+    check(
+      'and it waited for the lamp, not for the whole deadline',
+      elapsed >= 1500 && elapsed < 3000,
+      `${elapsed}ms`
+    );
+    bulb.reset();
+    await back.close();
+  }
+
+  // ---------------------------------------------------------------- 59
+  console.log('\n59. A lamp that never comes back is still given up');
+  {
+    const lamp = new FakeLamp({ silent: true });
+    await lamp.listen();
+    const { bulb } = await makeBulb(lamp, {
+      connection: { timeout: 200, connectTimeout: 200, recoverWithin: 1200 },
+    });
+    await lamp.close();
+    const started = Date.now();
+    const result = await bulb.getProperty(['power']).then(
+      () => 'ok',
+      () => 'failed'
+    );
+    const elapsed = Date.now() - started;
+    check('it fails', result === 'failed', result);
+    check('within about the deadline', elapsed < 2500, `${elapsed}ms`);
+    bulb.reset();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }

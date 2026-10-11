@@ -204,8 +204,8 @@ class FakeLamp {
       });
     });
   }
-  listen() {
-    return new Promise((r) => this.server.listen(0, '127.0.0.1', r));
+  listen(port = 0) {
+    return new Promise((r) => this.server.listen(port, '127.0.0.1', r));
   }
   get port() {
     return this.server.address().port;

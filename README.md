@@ -147,6 +147,7 @@ Full, with defaults shown:
         "retries": 1,
         "timeout": 2000,
         "connectTimeout": 5000,
+        "recoverWithin": 15000,
         "quota": 55,
         "coalesce": 80,
         "keepAlive": 30000,
@@ -181,6 +182,7 @@ How long, in milliseconds, the lamp takes to fade to a new value. Applies to the
 | `timeout` | `2000` | How long to wait for a reply before treating a command as lost. Lamps on Wi-Fi routinely need 100–200 ms, so anything under ~1000 ms mostly measures the network. |
 | `retries` | `1` | Extra attempts after a failure. Each runs on a **fresh** connection; a command is never written twice to the same socket. |
 | `connectTimeout` | `5000` | How long to wait for the TCP handshake. |
+| `recoverWithin` | `15000` | How long an unanswered command keeps waiting for its lamp to come back before it is given up. See [A lamp that drops off Wi-Fi](#a-lamp-that-drops-off-wi-fi). |
 | `quota` | `55` | Commands per minute per lamp. The firmware allows 60 and hangs up when that is exceeded, so this leaves a margin. |
 | `coalesce` | `80` | Window, in ms, over which characteristic writes are merged into one command. Raising it merges more; lowering it makes the lamp react sooner. |
 | `keepAlive` | `30000` | TCP keep-alive interval, so a half-open socket is noticed instead of swallowing commands. |
@@ -307,6 +309,12 @@ A brightness slider in the Home app writes many times a second, and while Adapti
 - **One read per lamp.** Opening the Home app reads the light and its switches together; the background refresh asks for power and night mode in a single `get_prop`.
 
 Every write from HomeKit is logged with the gap since the previous one (`HomeKit set Brightness=41 (+120 ms)`), and any reply slower than 500 ms gets a line of its own. Homebridge stamps its log to the second, and the order and spacing of writes within a second is what a gesture is made of.
+
+## A lamp that drops off Wi-Fi
+
+A bslamp3 sometimes drops off the network just as a command reaches it. Measured on 2026-10-11: the lamp accepts the command, sends no reply, stops answering ping within a third of a second, and rejoins the access point 6–8 s later — the router logs the disconnect and the reconnect in the same second — **without having carried the command out**. Across two weeks of logs about one wake from off in five ended that way, however long the lamp had been off; other commands fail less often. The door alert, which wakes every lamp at once, is where it shows most. The cause is not known: in a controlled run of 39 wakes on one lamp it happened once.
+
+The retry used to give up after about 7 s — just as the lamp came back — and an unreachable host dropped the command on the spot, which is what a lamp looks like while it rejoins. Now an unanswered command keeps knocking on fresh connections, which cost nothing against the command quota, until the lamp answers or `recoverWithin` runs out, and is then sent once more. The lamp still lights 6–8 s late in that case, but it lights.
 
 ## Where the switches live
 
