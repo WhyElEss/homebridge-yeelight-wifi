@@ -2149,6 +2149,59 @@ async function run() {
     bulb.reset();
   }
 
+  // ---------------------------------------------------------------- 60
+  console.log('\n60. A burst from the hub lands where the finger stopped');
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(lamp);
+    alActive(bulb);
+    // 17:15:00 on 2026-10-11: a 0 -> 100 drag, delivered 7-11 ms apart in
+    // this order, each step with On.
+    for (const b of [100, 60, 96, 100, 1]) {
+      // eslint-disable-next-line no-await-in-loop
+      await Promise.all([
+        service.getCharacteristic('On').write(true),
+        service.getCharacteristic('Brightness').write(b),
+      ]);
+      // eslint-disable-next-line no-await-in-loop
+      await sleep(8);
+    }
+    await sleep(300);
+    const wire = lamp.received.map((r) => [r.method, r.params]);
+    console.log('     wire:', JSON.stringify(wire));
+    check(
+      'one command, at 100',
+      wire.length === 1 && wire[0][1][wire[0][1].length - 1] === 100,
+      JSON.stringify(wire)
+    );
+    check(
+      'and HomeKit is put back to 100, not left on the last write',
+      service.getCharacteristic('Brightness').value === 100,
+      `${service.getCharacteristic('Brightness').value}`
+    );
+
+    // A drag at the Home app's own pace is untouched.
+    lamp.reset();
+    for (const b of [80, 60, 40]) {
+      // eslint-disable-next-line no-await-in-loop
+      await service.getCharacteristic('Brightness').write(b);
+      // eslint-disable-next-line no-await-in-loop
+      await sleep(220);
+    }
+    await sleep(200);
+    const steps = lamp.received.map((r) =>
+      r.method === 'set_bright' ? r.params[0] : r.params[r.params.length - 1]
+    );
+    check(
+      'a 220 ms drag still reaches the lamp step by step',
+      JSON.stringify(steps.slice(-1)) === '[40]' && steps.length === 3,
+      JSON.stringify(lamp.received.map((r) => [r.method, r.params]))
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }

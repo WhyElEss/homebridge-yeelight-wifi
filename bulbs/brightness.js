@@ -1,8 +1,20 @@
+// Writes closer together than this are one burst from the home hub, not a
+// finger. The Home app streams a drag at one write every 210-270 ms; on
+// 2026-10-11 the hub (an Apple TV) three times held a whole drag back and then
+// sent it in one go, 7-11 ms apart and out of order - 0 -> 100 arrived as
+// 100, 60, 96, 100, 1. Each time the first value of the burst was where the
+// finger stopped and the last was not, so the last one, which is what used to
+// win, lit the lamp at 1% under a slider showing 100.
+const BURST_GAP = 30;
+
 const Brightness = (Device) =>
   class extends Device {
     constructor(props, platform) {
       super(props, platform);
       this.bright = props.bright;
+      this.lastBrightnessWrite = 0;
+      this.burstValue = null;
+      this.burstTimer = null;
 
       (
         this.service.getCharacteristic(global.Characteristic.Brightness) ||
@@ -10,6 +22,10 @@ const Brightness = (Device) =>
       )
         .on('set', (value, callback) => {
           this.heard('Brightness', value);
+          if (this.inBurst(value)) {
+            callback(null);
+            return;
+          }
           this.accepted(this.setBrightness(value), () =>
             this.service
               .getCharacteristic(global.Characteristic.Brightness)
@@ -18,6 +34,29 @@ const Brightness = (Device) =>
           callback(null);
         })
         .updateValue(this.bright);
+    }
+
+    // Whether this write is part of a burst that already has its value. The
+    // first write of a burst goes through; the rest are logged and dropped,
+    // and once the burst is over HomeKit is told the value that was kept - it
+    // stored the last one it sent, which is how the slider fell back to 1.
+    inBurst(value) {
+      const now = Date.now();
+      const gap = now - this.lastBrightnessWrite;
+      this.lastBrightnessWrite = now;
+      if (gap >= BURST_GAP) {
+        this.burstValue = value;
+        return false;
+      }
+      this.log.info(
+        `${this.tag}: Brightness=${value} came ${gap} ms after the last one - part of a burst, keeping ${this.burstValue}.`
+      );
+      clearTimeout(this.burstTimer);
+      this.burstTimer = setTimeout(() => {
+        this.burstTimer = null;
+        this.reflect({ Brightness: this.burstValue });
+      }, BURST_GAP * 3);
+      return true;
     }
 
     get bright() {
