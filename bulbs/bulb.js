@@ -340,7 +340,15 @@ class YeeBulb {
     this.connected = false;
     this.connecting = null;
     this.powerSure = false;
-    if (sock && !sock.destroyed) sock.destroy();
+    // Torn down with a reset, not a close. A close leaves the kernel holding
+    // whatever the lamp never acknowledged and retransmitting it: on
+    // 2026-10-11 at 18:45:44 a set_scene went out again on the dead socket
+    // seven seconds after it had already landed on the new one. A late copy
+    // like that can undo whatever happened to the lamp in between.
+    if (sock && !sock.destroyed) {
+      if (typeof sock.resetAndDestroy === 'function') sock.resetAndDestroy();
+      else sock.destroy();
+    }
     // Done here rather than from the close handler, which can no longer tell
     // that this socket was the current one.
     this.failPending(new Error('connection reset'));

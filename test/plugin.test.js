@@ -2202,6 +2202,28 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 61
+  console.log('\n61. A dropped socket is reset, so nothing on it is sent late');
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { bulb } = await makeBulb(lamp);
+    await bulb.getProperty(['power']);
+    const [sock] = [...lamp.sockets];
+    const seen = new Promise((resolve) => {
+      sock.on('error', (err) => resolve(err.code));
+      sock.on('end', () => resolve('FIN'));
+    });
+    bulb.reset();
+    const how = await Promise.race([seen, sleep(1000).then(() => 'nothing')]);
+    check(
+      'the lamp sees a reset, not an orderly close',
+      how === 'ECONNRESET',
+      how
+    );
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }
