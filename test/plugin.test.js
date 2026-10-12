@@ -2260,6 +2260,70 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 63
+  console.log('\n63. Night mode entered from off goes back to off');
+  {
+    const lamp = new FakeLamp({ props: { active_mode: '', nl_br: '0' } });
+    await lamp.listen();
+    const { bulb, accessory, service } = await makeBulb(lamp);
+    const sw = moonlightSwitch(accessory).getCharacteristic('On');
+    await sw.write(true);
+    await sleep(200);
+    check(
+      'in with set_power mode 5',
+      JSON.stringify(lamp.received.map((r) => r.params)) ===
+        JSON.stringify([['on', 'smooth', 400, 5]]),
+      JSON.stringify(lamp.received.map((r) => [r.method, r.params]))
+    );
+    lamp.reset();
+    // 13:52:13 and 13:55:39 on 2026-10-12: this lit the lamp at 42% and 39%.
+    await sw.write(false);
+    await sleep(300);
+    const wire = lamp.received.map((r) => [r.method, r.params]);
+    console.log('     wire:', JSON.stringify(wire));
+    check(
+      'out with a single set_power off',
+      JSON.stringify(wire) ===
+        JSON.stringify([['set_power', ['off', 'smooth', 400]]]),
+      JSON.stringify(wire)
+    );
+    check('the lamp is off', bulb.power === false, `${bulb.power}`);
+    check(
+      'and HomeKit shows it off',
+      service.getCharacteristic('On').value === false,
+      `${service.getCharacteristic('On').value}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 64
+  console.log('\n64. Night mode belongs to a lit lamp');
+  {
+    const lamp = new FakeLamp({ props: { active_mode: '', nl_br: '0' } });
+    await lamp.listen();
+    const { bulb, accessory } = await makeBulb(lamp);
+    const sw = moonlightSwitch(accessory).getCharacteristic('On');
+    // Measured: switched off in night mode, the lamp still reports nl_br 1.
+    lampSays(bulb, { nl_br: '1' });
+    check('a dark lamp with nl_br 1 is not in night mode', !bulb.nightMode, '');
+    // Woken into night mode, it announces nl_br ahead of power.
+    lampSays(bulb, { nl_br: '1', bright: '1', power: 'on' });
+    check(
+      'nl_br then power in one message reads as night mode',
+      bulb.nightMode === true && sw.value === true,
+      `${bulb.nightMode} ${sw.value}`
+    );
+    lampSays(bulb, { power: 'off' });
+    check(
+      'and switching the lamp off takes the switch down',
+      bulb.nightMode === false && sw.value === false,
+      `${bulb.nightMode} ${sw.value}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }

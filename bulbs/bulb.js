@@ -420,7 +420,12 @@ class YeeBulb {
 
   stateHandler(message) {
     if (message.method !== 'props' || !message.params) return false;
-    Object.keys(message.params).forEach((param) => {
+    // Power first: what the other properties mean can depend on it. Waking a
+    // lamp into night mode announces nl_br ahead of power in the same message.
+    const params = Object.keys(message.params).sort(
+      (a, b) => (b === 'power') - (a === 'power')
+    );
+    params.forEach((param) => {
       this.updateStateFromProp(param, message.params[param]);
     });
     return true;

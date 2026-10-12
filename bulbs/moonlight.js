@@ -226,6 +226,16 @@ const MoonlightMode = (Device) =>
       this.activeMode = DAYLIGHT_MODE;
       this.publishMoonlightState();
 
+      // A lamp that was off before the mode goes back to off. Switching it
+      // off is enough: measured on 2026-10-12, a lamp switched off in night
+      // mode comes back in daylight on its next plain power-on. Restoring its
+      // brightness instead is what lit it at 42% and 39%.
+      if (snap && snap.power === false) {
+        await this.applyState({ power: false, force: true });
+        this.log.debug(`${this.tag}: night mode off, back to off.`);
+        return;
+      }
+
       // Putting the lamp back where it was is also what takes it out of the
       // mode - any temperature or brightness command ends it - so there is no
       // separate command for the mode itself. Adaptive Lighting's nudges were
@@ -287,8 +297,22 @@ const MoonlightMode = (Device) =>
     }
 
     updateStateFromProp(prop, value) {
+      // Night mode is something a lit lamp is in. Switched off, the lamp
+      // still reports nl_br 1, but its next power-on is daylight - so a switch
+      // left on over a dark lamp would be claiming a mode that will not come
+      // back.
+      if (prop === 'power' && !(value === 'on' || value === true)) {
+        if (this.nightMode) {
+          this.activeMode = DAYLIGHT_MODE;
+          this.moonlightSnapshot = null;
+          this.publishMoonlightState();
+        }
+        super.updateStateFromProp(prop, value);
+        return;
+      }
+
       if (prop === this.moonlightProp) {
-        const mode = this.modeFrom(value);
+        const mode = this.power ? this.modeFrom(value) : DAYLIGHT_MODE;
         if (mode !== this.activeMode) {
           // The lamp is the authority. The Yeelight app, a scene, another
           // controller - anything can end the mode, and a switch left on would
