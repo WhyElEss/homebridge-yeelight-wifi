@@ -21,6 +21,9 @@ const Brightness = (Device) =>
       this.burstValues = [];
       this.burstValue = null;
       this.burstTimer = null;
+      // Adaptive Lighting's temperature for each brightness the burst carried,
+      // filled in by the temperature mixin.
+      this.burstTemperatures = new Map();
 
       (
         this.service.getCharacteristic(global.Characteristic.Brightness) ||
@@ -55,6 +58,7 @@ const Brightness = (Device) =>
       if (gap >= BURST_GAP) {
         this.burstBase = this.power ? Number(this.bright) || 0 : 0;
         this.burstValues = [value];
+        this.burstTemperatures = new Map();
         this.burstValue = value;
         return false;
       }
@@ -74,9 +78,39 @@ const Brightness = (Device) =>
       clearTimeout(this.burstTimer);
       this.burstTimer = setTimeout(() => {
         this.burstTimer = null;
+        // The curve's temperature for the chosen value, if the burst carried
+        // it. Handing the value back to HomeKit recomputes the curve only when
+        // it changes what HomeKit holds - and when the choice was the last
+        // value of the burst it does not, so the temperature would stay the
+        // one computed for the first value. Found by the Govee port of this
+        // rule; a lamp already at this temperature is not sent it again.
+        const mired = this.burstTemperatures.get(this.burstValue);
+        const held = this.service.getCharacteristic(
+          global.Characteristic.Brightness
+        ).value;
+        if (mired !== undefined && held === this.burstValue) {
+          this.applyCurveTemperature(mired);
+        }
         this.reflect({ Brightness: this.burstValue });
       }, BURST_GAP * 3);
       return true;
+    }
+
+    // Queued straight onto the lamp's desired state rather than through
+    // setTemperature: the burst usually closes while the command waking the
+    // lamp is still on the wire, and setTemperature would only remember a
+    // temperature for a lamp it still thinks is off - which the wake's own
+    // commit then overwrites with the first value's temperature.
+    applyCurveTemperature(mired) {
+      const waking =
+        this.power ||
+        this.inflight ||
+        (this.desired && this.desired.power === true);
+      if (!waking) {
+        this._temperature = mired;
+        return;
+      }
+      this.accepted(this.applyState({ ct: mired }));
     }
 
     // The furthest value in the direction the burst went from where the lamp

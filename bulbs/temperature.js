@@ -45,6 +45,15 @@ const Temperature = (Device) =>
           // lamp at 4950 K under a kept 100%. Once the burst is over the kept
           // brightness is handed back to HomeKit and the curve's temperature
           // for it arrives on its own.
+          // Every curve temperature that follows a burst write is kept against
+          // that write's brightness, so the chosen one can be applied when the
+          // burst closes.
+          if (fromAdaptiveLighting && this.burstTemperatures) {
+            const values = this.burstValues || [];
+            if (values.length) {
+              this.burstTemperatures.set(values[values.length - 1], value);
+            }
+          }
           if (fromAdaptiveLighting && this.burstTimer) {
             this.log.debug(
               `${this.tag}: dropping an Adaptive Lighting temperature that follows a dropped brightness.`

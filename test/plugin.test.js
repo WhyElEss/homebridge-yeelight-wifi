@@ -2449,6 +2449,46 @@ async function run() {
     );
   }
 
+  // ---------------------------------------------------------------- 68
+  console.log(
+    '\n68. A burst whose choice is its last value still gets its curve'
+  );
+  {
+    const lamp = new FakeLamp({ delay: 60 });
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(lamp);
+    alActive(bulb);
+    // 14:20:33 on 2026-10-12: 67 6 98 100 from off, chosen 100 = the last
+    // value, so handing 100 back to HomeKit changes nothing and HAP never
+    // recomputes the curve for it.
+    const curve = { 67: 300, 6: 220, 98: 240, 100: 250 };
+    for (const b of [67, 6, 98, 100]) {
+      // eslint-disable-next-line no-await-in-loop
+      await Promise.all([
+        service.getCharacteristic('On').write(true),
+        service.getCharacteristic('Brightness').write(b),
+      ]);
+      // eslint-disable-next-line no-await-in-loop
+      await service.getCharacteristic('ColorTemperature').write(curve[b], AL);
+      // eslint-disable-next-line no-await-in-loop
+      await sleep(8);
+    }
+    await sleep(500);
+    const wire = lamp.received.map((r) => [r.method, r.params]);
+    console.log('     wire:', JSON.stringify(wire));
+    const kelvin = Math.round(10 ** 6 / 250);
+    const last = wire[wire.length - 1];
+    const ct =
+      last && last[0] === 'set_scene' ? last[1][1] : last && last[1][0];
+    check(
+      'the lamp ends at 100% on the curve temperature for 100%',
+      bulb.bright === 100 && ct === kelvin,
+      `bright=${bulb.bright} ct=${ct} want ${kelvin}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }
