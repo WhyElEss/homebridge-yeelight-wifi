@@ -2360,6 +2360,35 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 66
+  console.log('\n66. A bare power-on tells HomeKit the brightness it woke at');
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(
+      lamp,
+      {},
+      { powerOn: { brightness: 100 } }
+    );
+    // 14:12:40 on 2026-10-12: woken at 100%, HomeKit still said 1%.
+    service.getCharacteristic('Brightness').updateValue(1);
+    await service.getCharacteristic('On').write(true);
+    await sleep(250);
+    const wire = lamp.received.map((r) => [r.method, r.params]);
+    check(
+      'woken at 100% in one set_scene',
+      wire.length === 1 && wire[0][0] === 'set_scene' && wire[0][1][2] === 100,
+      JSON.stringify(wire)
+    );
+    check(
+      'and HomeKit shows 100%',
+      service.getCharacteristic('Brightness').value === 100,
+      `${service.getCharacteristic('Brightness').value}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }

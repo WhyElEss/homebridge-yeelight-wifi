@@ -914,7 +914,10 @@ class YeeBulb {
     this.log.debug(
       `${this.tag}: waking with ${JSON.stringify(patch)} on a bare power-on.`
     );
-    return Object.assign({}, desired, patch);
+    // Remembered so the flush can tell HomeKit: these are values the lamp
+    // takes that no controller wrote, and HomeKit would otherwise go on
+    // showing the old ones - a lamp woken at 100% under a slider at 1%.
+    return Object.assign({}, desired, patch, { defaulted: patch });
   }
 
   // set_scene turns the lamp on and applies colour plus brightness atomically.
@@ -959,8 +962,19 @@ class YeeBulb {
         this._bright = level;
         this.colorMode = 2;
         this.onTemperatureApplied(mired);
+        this.reflectDefaults(desired.defaulted, level, mired);
       },
     };
+  }
+
+  // Hands HomeKit the brightness and temperature a bare power-on woke the lamp
+  // with. The lamp's own announcement of them is held back as our echo.
+  reflectDefaults(defaulted, level, mired) {
+    if (!defaulted) return;
+    const values = {};
+    if (defaulted.bright !== undefined) values.Brightness = level;
+    if (defaulted.ct !== undefined) values.ColorTemperature = Math.round(mired);
+    this.reflect(values);
   }
 
   // Overridden by the temperature mixin.
