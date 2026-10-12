@@ -7,7 +7,10 @@
 // 100) and wrong once (67, 6, 98, 100 for a drag to 100), and the last value
 // was right twice. What was right every time is the value furthest from where
 // the lamp started, in the direction the values went.
-const BURST_GAP = 30;
+// 100 ms, not 30: inside bursts the gaps are mostly 7-11 ms, but 30-89 ms
+// gaps occur too (17:29:39 on 2026-10-11 split a burst at 64 ms), while the
+// quickest gap ever measured in an ordinary drag is 130 ms.
+const BURST_GAP = 100;
 
 const Brightness = (Device) =>
   class extends Device {

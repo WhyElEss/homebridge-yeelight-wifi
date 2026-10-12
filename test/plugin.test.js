@@ -1893,21 +1893,22 @@ async function run() {
     '\n52. A fast drag never leaves the lamp more than a step behind'
   );
   {
-    const lamp = new FakeLamp({ delay: 250 });
+    const lamp = new FakeLamp({ delay: 400 });
     await lamp.listen();
     const { bulb, service } = await makeBulb(lamp, {}, { power: 'on' });
     alActive(bulb);
     lampSays(bulb, { power: 'on' });
     const started = Date.now();
-    // Twenty steps, one every 40 ms: faster than the lamp answers.
+    // Twenty steps, one every 140 ms - the Home app's quickest measured pace
+    // is 130 ms - against a lamp that takes 400 ms to answer.
     for (let b = 100; b > 20; b -= 4) {
       // eslint-disable-next-line no-await-in-loop
       await dragStep(service, b, 300 + (100 - b), true);
       // eslint-disable-next-line no-await-in-loop
-      await sleep(40);
+      await sleep(140);
     }
     const dragged = Date.now() - started;
-    await sleep(800);
+    await sleep(1200);
     const wire = lamp.received.map((r) => [r.method, r.params]);
     console.log(
       `     ${wire.length} commands for 20 steps over ${dragged} ms:`,
@@ -1915,7 +1916,7 @@ async function run() {
     );
     check(
       'the lamp got far fewer commands than steps',
-      wire.length <= 6,
+      wire.length <= 10,
       `${wire.length}`
     );
     const last = wire[wire.length - 1];
@@ -2484,6 +2485,63 @@ async function run() {
       'the lamp ends at 100% on the curve temperature for 100%',
       bulb.bright === 100 && ct === kelvin,
       `bright=${bulb.bright} ct=${ct} want ${kelvin}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 69
+  console.log('\n69. A burst with a 64 ms gap is still one burst');
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(lamp);
+    // 17:29:39 on 2026-10-11: the second write came 64 ms after the first.
+    const steps = [
+      [100, 0],
+      [3, 64],
+      [3, 10],
+      [51, 10],
+    ];
+    for (const [b, gap] of steps) {
+      // eslint-disable-next-line no-await-in-loop
+      await sleep(gap);
+      // eslint-disable-next-line no-await-in-loop
+      await Promise.all([
+        service.getCharacteristic('On').write(true),
+        service.getCharacteristic('Brightness').write(b),
+      ]);
+    }
+    await sleep(500);
+    const last = lamp.received[lamp.received.length - 1];
+    const level =
+      last.method === 'set_bright'
+        ? last.params[0]
+        : last.params[last.params.length - 1];
+    check('lands on 100', level === 100, JSON.stringify(lamp.received));
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 70
+  console.log('\n70. A second Off for a lamp known to be off sends nothing');
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(lamp, {}, { power: 'on' });
+    lampSays(bulb, { power: 'on' });
+    await service.getCharacteristic('Brightness').write(0);
+    await sleep(250);
+    lampSays(bulb, { power: 'off' });
+    lamp.reset();
+    // 17:06:47 on 2026-10-11: a second zero 257 ms later.
+    await service.getCharacteristic('Brightness').write(0);
+    await service.getCharacteristic('On').write(false);
+    await sleep(250);
+    check(
+      'nothing on the wire',
+      lamp.received.length === 0,
+      JSON.stringify(lamp.received)
     );
     bulb.reset();
     await lamp.close();

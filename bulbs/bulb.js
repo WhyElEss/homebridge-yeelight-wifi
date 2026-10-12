@@ -748,6 +748,10 @@ class YeeBulb {
 
     // Off wins over anything else that landed in the same window.
     if (desired.power === false) {
+      // A lamp that said it is off, over a socket open since, needs no
+      // second set_power off. A drag to zero sends a zero, and often an Off
+      // with it, more than once.
+      if (!this.power && this.powerSure) return [];
       return [
         {
           cmd: {
