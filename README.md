@@ -284,7 +284,7 @@ Guarding the writes that arrive after the switch is not enough on its own: one t
 
 Cost on the wire: one command in, two out — the temperature and the brightness.
 
-**Night mode and an unlit lamp.** Night mode belongs to a lamp that is lit. Measured on 2026-10-12: switched off while in night mode, a lamp goes on reporting `nl_br: 1`, but its next plain power-on comes back in daylight. So switching a lamp off takes its night-mode switch down, and leaving night mode on a lamp that was off before it is a single `set_power off` — restoring the brightness instead used to light the lamp up.
+**Night mode and an unlit lamp.** Night mode belongs to a lamp that is lit. Measured on 2026-10-12: switched off while in night mode, a lamp goes on reporting `nl_br: 1`, but its next plain power-on comes back in daylight. So switching a lamp off takes its night-mode switch down, and leaving night mode on a lamp that was off before it is a single `set_power off` — restoring the brightness instead used to light the lamp up. A lamp that was lit in a colour goes back to that colour: `set_hsv` also ends the mode, but leaves the night light's 1% in force, so the colour goes back with its brightness.
 
 ## Whose change is it
 

@@ -2324,6 +2324,42 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 65
+  console.log(
+    '\n65. Night mode entered from a colour goes back to that colour'
+  );
+  {
+    const lamp = new FakeLamp({ props: { active_mode: '', nl_br: '0' } });
+    await lamp.listen();
+    const { bulb, accessory } = await makeBulb(lamp, {}, { power: 'on' });
+    lampSays(bulb, {
+      power: 'on',
+      color_mode: '3',
+      hue: '240',
+      sat: '100',
+      bright: '60',
+    });
+    const sw = moonlightSwitch(accessory).getCharacteristic('On');
+    await sw.write(true);
+    await sleep(200);
+    lamp.reset();
+    await sw.write(false);
+    await sleep(300);
+    const wire = lamp.received.map((r) => [r.method, r.params]);
+    console.log('     wire:', JSON.stringify(wire));
+    check(
+      'the colour and its brightness, by the commands that end the mode',
+      JSON.stringify(wire) ===
+        JSON.stringify([
+          ['set_hsv', [240, 100, 'smooth', 400]],
+          ['set_bright', [60, 'smooth', 400]],
+        ]),
+      JSON.stringify(wire)
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }

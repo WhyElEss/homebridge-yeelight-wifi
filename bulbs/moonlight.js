@@ -17,6 +17,8 @@
 const { switchService, MOONLIGHT } = require('../switches');
 
 const DAYLIGHT_MODE = 0;
+// color_mode as the lamp reports it: 1 RGB, 2 colour temperature, 3 HSV.
+const HSV_MODE = 3;
 const MOONLIGHT_MODE = 1;
 // set_power's optional "mode" parameter.
 const NIGHT_LIGHT = 5;
@@ -170,7 +172,14 @@ const MoonlightMode = (Device) =>
 
       // Taken before the command goes out: from here on the brightness we know
       // is the night light's, and what to come back to would be lost.
-      this.moonlightSnapshot = { bright: this.bright, power: this.power };
+      this.moonlightSnapshot = {
+        bright: this.bright,
+        power: this.power,
+        // A lamp lit in a colour goes back to that colour, not to white.
+        colorMode: this.colorMode,
+        hue: this.hue,
+        sat: this.sat,
+      };
       this.log.debug(
         `${this.tag}: night mode on, snapshot ${JSON.stringify(
           this.moonlightSnapshot
@@ -244,7 +253,19 @@ const MoonlightMode = (Device) =>
       const patch = { power: true };
       const reflected = {};
 
-      if (Number.isFinite(this.temperature)) {
+      // Measured on 2026-10-12: set_hsv ends the mode as well, but leaves the
+      // night light's 1% in force, so a colour goes back with its brightness.
+      const colour =
+        snap &&
+        snap.colorMode === HSV_MODE &&
+        Number.isFinite(snap.hue) &&
+        Number.isFinite(snap.sat);
+      if (colour) {
+        patch.hue = snap.hue;
+        patch.sat = snap.sat;
+        reflected.Hue = snap.hue;
+        reflected.Saturation = snap.sat;
+      } else if (Number.isFinite(this.temperature)) {
         patch.ct = this.temperature;
         reflected.ColorTemperature = this.temperature;
       }
