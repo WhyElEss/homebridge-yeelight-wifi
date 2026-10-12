@@ -1,10 +1,12 @@
 // Writes closer together than this are one burst from the home hub, not a
-// finger. The Home app streams a drag at one write every 210-270 ms; on
-// 2026-10-11 the hub (an Apple TV) three times held a whole drag back and then
-// sent it in one go, 7-11 ms apart and out of order - 0 -> 100 arrived as
-// 100, 60, 96, 100, 1. Each time the first value of the burst was where the
-// finger stopped and the last was not, so the last one, which is what used to
-// win, lit the lamp at 1% under a slider showing 100.
+// finger. The Home app streams a drag at one write every 210-270 ms; the hub
+// (an Apple TV) sometimes holds a whole drag back and sends it in one go,
+// 7-11 ms apart and out of order. Neither end of a burst is where the finger
+// stopped: of the four bursts whose end the owner reported on 2026-10-11/12,
+// the first value was right three times (100, 60, 96, 100, 1 for a drag to
+// 100) and wrong once (67, 6, 98, 100 for a drag to 100), and the last value
+// was right twice. What was right every time is the value furthest from where
+// the lamp started, in the direction the values went.
 const BURST_GAP = 30;
 
 const Brightness = (Device) =>
@@ -13,6 +15,10 @@ const Brightness = (Device) =>
       super(props, platform);
       this.bright = props.bright;
       this.lastBrightnessWrite = 0;
+      // The burst in progress: where the lamp stood when it began, every
+      // value it has carried, and the one currently chosen.
+      this.burstBase = 0;
+      this.burstValues = [];
       this.burstValue = null;
       this.burstTimer = null;
 
@@ -36,27 +42,51 @@ const Brightness = (Device) =>
         .updateValue(this.bright);
     }
 
-    // Whether this write is part of a burst that already has its value. The
-    // first write of a burst goes through; the rest are logged and dropped,
-    // and once the burst is over HomeKit is told the value that was kept - it
-    // stored the last one it sent, which is how the slider fell back to 1.
+    // Whether this write belongs to a burst already under way. The first
+    // write of a burst goes through at once; each one after it is folded into
+    // the burst, and if that moves the choice the lamp is sent the new choice -
+    // usually before the first has even left the coalescing window. Once the
+    // burst is over HomeKit is told the value chosen, since the hub keeps the
+    // last one it sent.
     inBurst(value) {
       const now = Date.now();
       const gap = now - this.lastBrightnessWrite;
       this.lastBrightnessWrite = now;
       if (gap >= BURST_GAP) {
+        this.burstBase = this.power ? Number(this.bright) || 0 : 0;
+        this.burstValues = [value];
         this.burstValue = value;
         return false;
       }
+
+      this.burstValues.push(value);
+      const chosen = this.burstChoice();
       this.log.info(
-        `${this.tag}: Brightness=${value} came ${gap} ms after the last one - part of a burst, keeping ${this.burstValue}.`
+        `${this.tag}: Brightness=${value} came ${gap} ms after the last one - part of a burst from ${this.burstBase}, keeping ${chosen}.`
       );
+      if (chosen !== this.burstValue) {
+        this.burstValue = chosen;
+        this.accepted(this.setBrightness(chosen), () =>
+          this.reflect({ Brightness: this.bright })
+        );
+      }
+
       clearTimeout(this.burstTimer);
       this.burstTimer = setTimeout(() => {
         this.burstTimer = null;
         this.reflect({ Brightness: this.burstValue });
       }, BURST_GAP * 3);
       return true;
+    }
+
+    // The furthest value in the direction the burst went from where the lamp
+    // stood; the last one when it went both ways.
+    burstChoice() {
+      const values = this.burstValues.map(Number);
+      const base = this.burstBase;
+      if (values.every((v) => v >= base)) return Math.max(...values);
+      if (values.every((v) => v <= base)) return Math.min(...values);
+      return values[values.length - 1];
     }
 
     get bright() {

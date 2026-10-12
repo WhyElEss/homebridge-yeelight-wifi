@@ -2389,6 +2389,66 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 67
+  console.log('\n67. A burst lands on the end the drag went to');
+  {
+    const run = async (from, values) => {
+      const lamp = new FakeLamp();
+      await lamp.listen();
+      const { bulb, service } = await makeBulb(
+        lamp,
+        {},
+        from === 'off' ? {} : { power: 'on', bright: String(from) }
+      );
+      for (const b of values) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.all([
+          service.getCharacteristic('On').write(true),
+          service.getCharacteristic('Brightness').write(b),
+        ]);
+        // eslint-disable-next-line no-await-in-loop
+        await sleep(8);
+      }
+      await sleep(400);
+      const last = lamp.received[lamp.received.length - 1];
+      const level = last
+        ? last.method === 'set_bright'
+          ? last.params[0]
+          : last.params[last.params.length - 1]
+        : null;
+      const shown = service.getCharacteristic('Brightness').value;
+      bulb.reset();
+      await lamp.close();
+      return { level, shown, wire: lamp.received.length };
+    };
+    // 14:20:33 on 2026-10-12, a drag to 100 from off.
+    let r = await run('off', [67, 6, 98, 100]);
+    check(
+      'from off, 67 6 98 100 lands on 100',
+      r.level === 100 && r.shown === 100,
+      JSON.stringify(r)
+    );
+    // 17:15:00 on 2026-10-11, a drag to 100 from off.
+    r = await run('off', [100, 60, 96, 100, 1]);
+    check(
+      'from off, 100 60 96 100 1 lands on 100',
+      r.level === 100 && r.shown === 100,
+      JSON.stringify(r)
+    );
+    r = await run(80, [30, 70, 10, 50]);
+    check(
+      'down from 80, 30 70 10 50 lands on 10',
+      r.level === 10 && r.shown === 10,
+      JSON.stringify(r)
+    );
+    r = await run(50, [70, 30, 45]);
+    check(
+      'both ways from 50, the last value wins',
+      r.level === 45 && r.shown === 45,
+      JSON.stringify(r)
+    );
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }
