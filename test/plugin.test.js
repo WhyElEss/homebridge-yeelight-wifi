@@ -2224,6 +2224,42 @@ async function run() {
     await lamp.close();
   }
 
+  // ---------------------------------------------------------------- 62
+  console.log(
+    '\n62. A burst does not leave Adaptive Lighting on a dropped value'
+  );
+  {
+    const lamp = new FakeLamp({ delay: 60 });
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(lamp);
+    alActive(bulb);
+    // 13:43:21 on 2026-10-12: a burst ending in 3%, each brightness followed
+    // by the temperature HAP's Adaptive Lighting computes for it.
+    const curve = { 100: 333, 4: 202, 52: 280, 3: 202 };
+    for (const b of [100, 4, 52, 3]) {
+      // eslint-disable-next-line no-await-in-loop
+      await Promise.all([
+        service.getCharacteristic('On').write(true),
+        service.getCharacteristic('Brightness').write(b),
+      ]);
+      // eslint-disable-next-line no-await-in-loop
+      await service.getCharacteristic('ColorTemperature').write(curve[b], AL);
+      // eslint-disable-next-line no-await-in-loop
+      await sleep(8);
+    }
+    await sleep(400);
+    const wire = lamp.received.map((r) => [r.method, r.params]);
+    console.log('     wire:', JSON.stringify(wire));
+    check(
+      'one scene at 100% and the curve temperature for 100%',
+      JSON.stringify(wire) ===
+        JSON.stringify([['set_scene', ['ct', 3003, 100]]]),
+      JSON.stringify(wire)
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }

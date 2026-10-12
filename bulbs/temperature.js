@@ -39,6 +39,20 @@ const Temperature = (Device) =>
             'controller' in context;
           if (!fromAdaptiveLighting) this.heard('ColorTemperature', value);
 
+          // HAP answers every brightness change with a temperature of its
+          // own, including the values of a hub burst that the brightness
+          // mixin has dropped. On 2026-10-11 the last of those (3%) put the
+          // lamp at 4950 K under a kept 100%. Once the burst is over the kept
+          // brightness is handed back to HomeKit and the curve's temperature
+          // for it arrives on its own.
+          if (fromAdaptiveLighting && this.burstTimer) {
+            this.log.debug(
+              `${this.tag}: dropping an Adaptive Lighting temperature that follows a dropped brightness.`
+            );
+            callback(null);
+            return;
+          }
+
           this.accepted(this.setTemperature(value, fromAdaptiveLighting), () =>
             this.service
               .getCharacteristic(ColorTemperature)
