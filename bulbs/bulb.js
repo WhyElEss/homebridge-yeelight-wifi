@@ -22,6 +22,9 @@ class YeeBulb {
     this.name = accessory.displayName;
     this.model = model;
     this.log = platform.log;
+    // Told when the lamp moves, so the address survives a restart, and when
+    // it stops answering, so it can be looked for.
+    this.platform = platform;
     this.cmds = {};
     this.sock = null;
     this.connected = false;
@@ -88,6 +91,10 @@ class YeeBulb {
     this.offAt = 0;
     // When HomeKit last wrote anything, so the log can show the gaps.
     this.lastHeard = 0;
+    // Set when the read of the lamp's state at launch could not reach it. The
+    // first connection that does get through reads it then: until it does, the
+    // cache is whatever HomeKit was last told, possibly yesterday.
+    this.stateUnread = false;
 
     // The advertisement we were built from already carries the live state.
     this.power = props.power;
@@ -238,6 +245,20 @@ class YeeBulb {
     );
     this.endpoint = endpoint;
     this.reset();
+    this.platform.persist?.(this);
+  }
+
+  // The first connection after a lamp could not be reached catches up on
+  // whatever was skipped meanwhile. Extended by the moonlight mixin.
+  onConnected() {
+    if (!this.stateUnread) return;
+    this.stateUnread = false;
+    this.refreshState();
+  }
+
+  // A lamp that does not answer may simply have a new address.
+  lost() {
+    this.platform.lampLost?.(this);
   }
 
   // Advertisements carry the whole state, so refreshing from them costs no
@@ -283,8 +304,13 @@ class YeeBulb {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        if (err) reject(err);
-        else resolve();
+        if (err) {
+          // Told apart from a lamp that took the connection and then said
+          // nothing: only one that could not be reached at all is worth
+          // asking again the moment it can.
+          if (err instanceof Error) err.unreachable = true;
+          reject(err);
+        } else resolve();
       };
 
       sock.once('connect', () => {
@@ -300,6 +326,7 @@ class YeeBulb {
         sock.setKeepAlive(true, this.keepAlive);
         this.log.debug(`${this.tag}: connected.`);
         finish();
+        this.onConnected();
       });
 
       sock.on('data', (chunk) => this.onData(chunk));
@@ -490,6 +517,7 @@ class YeeBulb {
         // Whatever went wrong, the socket is suspect. Re-sending on it is what
         // burned through the quota before, so always start a fresh one.
         this.reset();
+        this.lost();
 
         if (attempt === this.retries) {
           this.log.error(
@@ -529,6 +557,9 @@ class YeeBulb {
         return;
       } catch (err) {
         this.reset();
+        // Rate-limited by the platform, so asking on every knock is free. A
+        // lamp found at a new address meanwhile is knocked on there next.
+        this.lost();
         if (Date.now() + 500 >= deadline) return;
         // eslint-disable-next-line no-await-in-loop
         await sleep(500);
@@ -586,6 +617,7 @@ class YeeBulb {
         });
       })
       .catch((err) => {
+        if (err && err.unreachable) this.stateUnread = true;
         this.log.warn(
           `${this.tag}: could not read the lamp's state: ${err.message || err}.`
         );

@@ -1,4 +1,5 @@
 const dgram = require('dgram');
+const os = require('os');
 const devices = require('./devices.json');
 const YeeBulb = require('./bulbs/bulb');
 const Brightness = require('./bulbs/brightness');
@@ -26,6 +27,44 @@ const {
 // cover the gap right after a restart instead of running forever.
 const SEARCH_INTERVAL = 15000;
 const SEARCH_ROUNDS = 40;
+// A sweep asks every address on the local network, so it is kept rare: a lamp
+// that has gone missing triggers one at most this often, whichever lamp asks.
+const SWEEP_EVERY = 30000;
+// One datagram per address, spaced out: each is preceded by an ARP broadcast
+// the lamps on Wi-Fi hear too, and a burst of those is the kind of load their
+// firmware handles worst. 254 addresses take about two seconds.
+const SWEEP_PACE = 8;
+// Larger networks are not swept at all; a /22 is already 1022 addresses.
+const SWEEP_MAX_HOSTS = 1024;
+
+// Every IPv4 address on the networks this machine sits on, its own excluded.
+function localHosts(interfaces = os.networkInterfaces()) {
+  const toInt = (ip) =>
+    ip.split('.').reduce((n, octet) => ((n << 8) | Number(octet)) >>> 0, 0);
+  const toIp = (n) =>
+    [24, 16, 8, 0].map((shift) => (n >>> shift) & 255).join('.');
+
+  const hosts = new Set();
+  Object.values(interfaces)
+    .flat()
+    .filter(
+      (address) =>
+        address &&
+        !address.internal &&
+        (address.family === 'IPv4' || address.family === 4)
+    )
+    .forEach(({ address, netmask }) => {
+      const mask = toInt(netmask);
+      const size = (~mask >>> 0) + 1;
+      if (size > SWEEP_MAX_HOSTS || size < 4) return;
+      const network = (toInt(address) & mask) >>> 0;
+      for (let i = 1; i < size - 1; i += 1) {
+        const host = toIp(network + i);
+        if (host !== address) hosts.add(host);
+      }
+    });
+  return [...hosts];
+}
 
 class YeePlatform {
   constructor(log, config, api) {
@@ -47,6 +86,7 @@ class YeePlatform {
     // Alert switches live on their own accessories, keyed by the same device
     // id as the lamp they belong to.
     this.alerts = {};
+    this.lastSweep = 0;
 
     this.sock.bind(this.port, () => {
       this.sock.setBroadcast(true);
@@ -71,6 +111,10 @@ class YeePlatform {
       this.sock.on('message', this.handleMessage.bind(this));
       this.reviveKnownDevices();
       log(`Searching for known devices...`);
+      // The saved addresses may have changed while Homebridge was down; a
+      // lamp that ignores multicast searches is only found this way, or by
+      // its own announcement up to an hour later.
+      this.sweep();
 
       let round = 0;
       do {
@@ -180,6 +224,56 @@ class YeePlatform {
       this.port,
       this.addr
     );
+  }
+
+  // A lamp tells us where it is only by announcing itself, and these lamps
+  // announce rarely - after the leases changed on 2026-10-19/20, a restart
+  // left two of them unreachable at their old addresses for 38 and 45 minutes.
+  // Two of the three answer a multicast search; the Entrance lamp ignored six
+  // rounds of it on 2026-10-23 and answered every search sent straight to its
+  // own address. So a lamp that has gone quiet is looked for both ways, and
+  // its reply moves it like an announcement would.
+  lampLost(bulb) {
+    this.log.debug(`${bulb.tag}: not answering, looking for it.`);
+    this.search();
+    this.sweep();
+  }
+
+  sweep() {
+    const now = Date.now();
+    if (now - this.lastSweep < SWEEP_EVERY) return;
+    this.lastSweep = now;
+
+    const hosts = localHosts();
+    if (!hosts.length) return;
+    this.log.debug(`Searching ${hosts.length} addresses one by one...`);
+
+    let next = 0;
+    const send = () => {
+      if (next >= hosts.length) return;
+      this.sock.send(
+        this.searchMessage,
+        0,
+        this.searchMessage.length,
+        this.port,
+        hosts[next],
+        () => {}
+      );
+      next += 1;
+      setTimeout(send, SWEEP_PACE).unref?.();
+    };
+    send();
+  }
+
+  // Saves where a lamp is, so the next launch starts from its current address.
+  // A move used to live only in memory: every restart went back to the address
+  // the lamp had when its accessory was first built, and waited for it to
+  // announce itself again.
+  persist(bulb) {
+    const { accessory } = bulb;
+    if (!accessory || !accessory.context) return;
+    accessory.context.endpoint = bulb.endpoint;
+    this.api.updatePlatformAccessories([accessory]);
   }
 
   handleMessage(message) {
@@ -396,3 +490,4 @@ class YeePlatform {
 }
 
 module.exports = YeePlatform;
+module.exports.localHosts = localHosts;

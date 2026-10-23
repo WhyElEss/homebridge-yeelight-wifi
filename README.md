@@ -64,6 +64,8 @@ lamp after: [ 'on', '20', '2703', '2' ]
 - The colour temperature range was advertised as 154–588 mired, but HomeKit defines the characteristic as 140–500. Adaptive Lighting computes its curve against exactly those bounds. HomeKit is now told 154–500; the lamp itself still goes wherever it always did.
 
 - Lamps were pinned to the address they were discovered at, so a new DHCP lease left one unreachable until Homebridge restarted. Announcements now update the endpoint — and the cached state, which costs nothing since the announcement already carries it.
+- A move was kept only in memory. After the leases changed on 2026-10-19/20, every restart sent the lamps back to the addresses they had when their accessories were first built, and two of them stayed unreachable for 38 and 45 minutes, until they happened to announce themselves. The new address is now saved with the accessory. A lamp that stops answering is also looked for at once: a multicast search, plus a search sent to every address of the local network one by one — the Entrance lamp ignores multicast searches entirely but answers one sent to its own address. Its reply moves it within seconds, and a command waiting for it goes out at the new address.
+- The night-mode switch was wired only after a probe of the lamp had answered. A lamp unreachable at launch kept a switch HomeKit could still write to with nothing behind it, so a 23:00 automation switched the mode on, HAP accepted it, and the lamp stayed lit all night. A switch HomeKit already has is answered from the first moment, what the probe learns is saved with the accessory, and a probe or state read that could not reach the lamp is repeated on the first connection that gets through.
 - A reply split across two TCP reads threw `JSON.parse` straight out of the data handler. The stream is now buffered by line.
 - Commands pending on a socket that closed were left to their own timeout instead of failing immediately.
 - TCP keep-alive, so a half-open socket is noticed instead of silently swallowing commands.
@@ -278,7 +280,7 @@ Guarding the writes that arrive after the switch is not enough on its own: one t
 
 **The lamp is the authority.** `nl_br` arrives in the lamp's own property notifications, so a mode ended by the Yeelight app, by another controller or by a scene of ours takes the switch down within a second. A lamp that is switched off reports `nl_br: 0`, which means the switch clears itself when the light goes out.
 
-**Turning it off.** Every lamp that has the mode gets the switch; `moonlight: false` on a lamp takes it away again, from the settings form or the JSON. `blacklist: ["active_mode"]`, the older spelling, still says the same thing. A lamp whose switch is turned off is not even probed for the mode, which is one command less per launch.
+**Turning it off.** Every lamp that has the mode gets the switch; `moonlight: false` on a lamp takes it away again, from the settings form or the JSON. `blacklist: ["active_mode"]`, the older spelling, still says the same thing. A lamp whose switch is turned off is not even probed for the mode, and a lamp already known to have it is not probed again: the answer is saved with the accessory.
 
 **With the alert switch.** An alert is a colour, so it ends night mode as it lands. The alert's snapshot records the mode, and the restore brings it back with the same `set_power` rather than trying to reproduce it as a colour.
 

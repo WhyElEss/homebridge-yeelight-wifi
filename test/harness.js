@@ -256,9 +256,17 @@ const Temperature = require('../bulbs/temperature');
 const Alert = require('../bulbs/alert');
 const { pipe } = require('../utils');
 
-async function makeBulb(lamp, config = {}, props = {}) {
+// `opts.platform` adds hooks to the fake platform, `opts.context` seeds what a
+// previous launch saved with the accessory, `opts.endpoint` points the lamp
+// somewhere other than the fake one, and `opts.switches` restores switch
+// services from the accessory cache before the lamp is built.
+async function makeBulb(lamp, config = {}, props = {}, opts = {}) {
   const accessory = new FakeAccessory('Lamp');
   accessory.context.did = '0xtest';
+  Object.assign(accessory.context, opts.context || {});
+  (opts.switches || []).forEach((subtype) =>
+    accessory.addService(new global.Service.Switch('Lamp', subtype))
+  );
   // Order mirrors platform.js: moonlight outside brightness and temperature so
   // it sees their writes coming, alert outside everything so its setTemperature
   // override sits outermost of all.
@@ -273,7 +281,7 @@ async function makeBulb(lamp, config = {}, props = {}) {
     {
       id: '0xtest',
       model: 'bslamp3',
-      endpoint: `127.0.0.1:${lamp.port}`,
+      endpoint: opts.endpoint || `127.0.0.1:${lamp.port}`,
       accessory,
       limits: { colorTemperature: [154, 588] },
       power: 'off',
@@ -283,7 +291,7 @@ async function makeBulb(lamp, config = {}, props = {}) {
       sat: '20',
       ...props,
     },
-    { log, config, api: {} }
+    { log, config, api: {}, ...(opts.platform || {}) }
   );
   // Let the moonlight probe finish so it does not pollute the counters.
   await new Promise((r) => setTimeout(r, 300));

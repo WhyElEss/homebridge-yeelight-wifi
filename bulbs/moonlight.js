@@ -39,11 +39,51 @@ const MoonlightMode = (Device) =>
       this.moonlightProp = null;
       // What the lamp was lit at before the mode was switched on.
       this.moonlightSnapshot = null;
+      // Set when the probe could not reach the lamp; the next connection that
+      // does get through probes again.
+      this.moonlightUnprobed = false;
+
+      // The switch used to be wired only once the probe had an answer. A lamp
+      // that could not be reached at launch - on 2026-10-21 and 10-22 that
+      // was a lamp waiting at an address it had left - kept a switch HomeKit
+      // could still write to, with nothing behind it: the 23:00 automation
+      // switched the mode on, HAP accepted it, and the lamp burned all night.
+      // What the probe learns is kept with the accessory, so a lamp known to
+      // have the mode is wired at once and asked nothing.
+      const saved = this.accessory.context.moonlightProp;
+      if (saved) {
+        this.moonlightProp = saved;
+        const reported = props[saved];
+        if (reported !== undefined && reported !== '') {
+          this.activeMode = this.power
+            ? this.modeFrom(reported)
+            : DAYLIGHT_MODE;
+        }
+        this.wireMoonlightSwitch();
+        return;
+      }
+      // A switch HomeKit already has is answered from the first moment;
+      // entering and leaving the mode need no probe.
+      if (this.accessory.getServiceById(global.Service.Switch, MOONLIGHT)) {
+        this.wireMoonlightSwitch();
+      }
+      this.probeMoonlight();
+    }
+
+    probeMoonlight() {
       this.initMoonlight().catch((err) => {
+        if (err && err.unreachable) this.moonlightUnprobed = true;
         this.log.debug(
           `${this.tag}: moonlight probe failed: ${err.message || err}.`
         );
       });
+    }
+
+    onConnected() {
+      super.onConnected();
+      if (!this.moonlightUnprobed) return;
+      this.moonlightUnprobed = false;
+      this.probeMoonlight();
     }
 
     async initMoonlight() {
@@ -60,10 +100,18 @@ const MoonlightMode = (Device) =>
       else return;
 
       this.log(`Device ${this.name} supports moonlight mode`);
-      this.activeMode = this.modeFrom(
-        this.moonlightProp === 'active_mode' ? activeMode : nightBrightness
-      );
+      this.activeMode = this.power
+        ? this.modeFrom(
+            this.moonlightProp === 'active_mode' ? activeMode : nightBrightness
+          )
+        : DAYLIGHT_MODE;
 
+      this.accessory.context.moonlightProp = this.moonlightProp;
+      this.platform.persist?.(this);
+      this.wireMoonlightSwitch();
+    }
+
+    wireMoonlightSwitch() {
       // Named after the lamp and kept on the lamp's own accessory, next to the
       // light and the alert switch: how those tiles are drawn is the owner's
       // choice in the Home app, not ours.

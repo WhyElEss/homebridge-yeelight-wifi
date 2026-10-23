@@ -2547,6 +2547,292 @@ async function run() {
     await lamp.close();
   }
 
+  // A port nothing listens on: connecting there fails at once, the way a lamp
+  // waiting at an address it has left does.
+  const deadEndpoint = async () => {
+    const gone = new FakeLamp();
+    await gone.listen();
+    const { port } = gone;
+    await gone.close();
+    return `127.0.0.1:${port}`;
+  };
+  const switchSet = (accessory) =>
+    moonlightSwitch(accessory).getCharacteristic('On');
+  const quick = { connection: { recoverWithin: 600 } };
+
+  // ---------------------------------------------------------------- 71
+  console.log(
+    '\n71. The moonlight switch works though the lamp was unreachable at launch'
+  );
+  {
+    const lamp = new FakeLamp({ props: { active_mode: '', nl_br: '0' } });
+    await lamp.listen();
+    const persisted = [];
+    const { bulb, accessory } = await makeBulb(
+      lamp,
+      quick,
+      { power: 'on' },
+      {
+        endpoint: await deadEndpoint(),
+        switches: [MOONLIGHT],
+        platform: { persist: (b) => persisted.push(b.endpoint) },
+      }
+    );
+    // The probe's two attempts, both refused.
+    await sleep(1200);
+    check(
+      'the switch HomeKit already has is answered',
+      typeof switchSet(accessory).handlers.set === 'function',
+      Object.keys(switchSet(accessory).handlers).join(',')
+    );
+
+    // 2026-10-22 23:10:22: the lamp's announcement arrives from its new lease.
+    bulb.relocate(`127.0.0.1:${lamp.port}`);
+    check(
+      'the new address is saved for the next launch',
+      persisted.includes(`127.0.0.1:${lamp.port}`),
+      JSON.stringify(persisted)
+    );
+    lamp.reset();
+    await switchSet(accessory).write(true);
+    await sleep(300);
+    const wire = lamp.received.map((r) => [r.method, r.params]);
+    console.log('     wire:', JSON.stringify(wire));
+    check(
+      'the 23:00 write reaches the lamp as night mode',
+      wire.some(
+        ([method, params]) =>
+          method === 'set_power' && params[0] === 'on' && params[3] === 5
+      ),
+      JSON.stringify(wire)
+    );
+    check(
+      'the probe is asked again once the lamp answers',
+      wire.some(
+        ([method, params]) => method === 'get_prop' && params.includes('nl_br')
+      ),
+      JSON.stringify(wire)
+    );
+    check(
+      'and what it learns is kept with the accessory',
+      accessory.context.moonlightProp === 'nl_br',
+      `${accessory.context.moonlightProp}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 72
+  console.log('\n72. A lamp known to have night mode is not probed at launch');
+  {
+    const lamp = new FakeLamp({ props: { active_mode: '', nl_br: '0' } });
+    await lamp.listen();
+    const { bulb, accessory } = await makeBulb(
+      lamp,
+      {},
+      { power: 'on' },
+      { context: { moonlightProp: 'nl_br' } }
+    );
+    check(
+      'nothing went to the lamp while it was built',
+      lamp.connections === 0,
+      `${lamp.connections} connection(s)`
+    );
+    check(
+      'the switch is wired',
+      typeof switchSet(accessory).handlers.set === 'function',
+      Object.keys(switchSet(accessory).handlers).join(',')
+    );
+    await switchSet(accessory).write(true);
+    await sleep(200);
+    check(
+      'one set_power into night mode',
+      JSON.stringify(lamp.received.map((r) => r.params)) ===
+        JSON.stringify([['on', 'smooth', 400, 5]]),
+      JSON.stringify(lamp.received)
+    );
+    bulb.updateStateFromProp('nl_br', '1');
+    check('the mode is read from nl_br', bulb.nightMode === true, '');
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 73
+  console.log(
+    '\n73. A lamp found at a new address takes the command waiting for it'
+  );
+  {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    let asked = 0;
+    const persisted = [];
+    const { bulb, service } = await makeBulb(
+      lamp,
+      { connection: { recoverWithin: 3000 } },
+      { power: 'on' },
+      {
+        endpoint: await deadEndpoint(),
+        context: { moonlightProp: 'nl_br' },
+        platform: {
+          persist: (b) => persisted.push(b.endpoint),
+          // What the sweep does when the lamp answers from its new address.
+          lampLost: (b) => {
+            asked += 1;
+            if (asked === 1) {
+              setTimeout(() => b.relocate(`127.0.0.1:${lamp.port}`), 100);
+            }
+          },
+        },
+      }
+    );
+    await service.getCharacteristic('On').write(false);
+    await sleep(1200);
+    check('the platform was asked to look', asked >= 1, `${asked}`);
+    check(
+      'the Off landed on the lamp at its new address',
+      lamp.methods().includes('set_power'),
+      JSON.stringify(lamp.received)
+    );
+    check('the lamp is off', bulb.power === false, `${bulb.power}`);
+    check(
+      'and the address is saved',
+      persisted[persisted.length - 1] === `127.0.0.1:${lamp.port}`,
+      JSON.stringify(persisted)
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 74
+  console.log(
+    "\n74. The lamp's state is read on the first connection that gets through"
+  );
+  {
+    const lamp = new FakeLamp({
+      props: { power: 'on', bright: '100', ct: '2762', nl_br: '0' },
+    });
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(
+      lamp,
+      quick,
+      { power: 'off' },
+      {
+        endpoint: await deadEndpoint(),
+        context: { moonlightProp: 'nl_br' },
+      }
+    );
+    // What reviveKnownDevices asks for at launch, while the address is stale.
+    await bulb.refreshState();
+    check('the failed read is remembered', bulb.stateUnread === true, '');
+    bulb.relocate(`127.0.0.1:${lamp.port}`);
+    lamp.reset();
+    await service.getCharacteristic('Brightness').write(40);
+    await sleep(300);
+    const reads = lamp.received.filter((r) => r.method === 'get_prop');
+    check(
+      'one full read once the lamp answers',
+      reads.length === 1 && reads[0].params.includes('bright'),
+      JSON.stringify(lamp.received)
+    );
+    check(
+      'the cache now has the lamp on',
+      bulb.power === true,
+      `${bulb.power}`
+    );
+    check('and asks no more', bulb.stateUnread === false, '');
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 75
+  console.log('\n75. The sweep covers the local network and nothing else');
+  {
+    const { localHosts } = require('../platform');
+    const hosts = localHosts({
+      lo: [
+        {
+          address: '127.0.0.1',
+          netmask: '255.0.0.0',
+          family: 'IPv4',
+          internal: true,
+        },
+      ],
+      eth0: [
+        {
+          address: '192.168.2.200',
+          netmask: '255.255.255.0',
+          family: 'IPv4',
+          internal: false,
+        },
+        {
+          address: 'fe80::1',
+          netmask: 'ffff:ffff:ffff:ffff::',
+          family: 'IPv6',
+          internal: false,
+        },
+      ],
+      docker0: [
+        {
+          address: '172.17.0.1',
+          netmask: '255.255.0.0',
+          family: 'IPv4',
+          internal: false,
+        },
+      ],
+    });
+    check('253 addresses on the /24', hosts.length === 253, `${hosts.length}`);
+    check(
+      'the lamps are in it',
+      ['192.168.2.30', '192.168.2.39', '192.168.2.41', '192.168.2.254'].every(
+        (ip) => hosts.includes(ip)
+      ),
+      ''
+    );
+    check(
+      'not this machine, the network or the broadcast address',
+      !['192.168.2.200', '192.168.2.0', '192.168.2.255'].some((ip) =>
+        hosts.includes(ip)
+      ),
+      ''
+    );
+    check(
+      'a /16 is too big to sweep',
+      !hosts.some((ip) => ip.startsWith('172.17.')),
+      ''
+    );
+
+    const YeePlatform = require('../platform');
+    const updated = [];
+    const accessory = { context: { endpoint: '192.168.2.217:55443' } };
+    YeePlatform.prototype.persist.call(
+      { api: { updatePlatformAccessories: (a) => updated.push(...a) } },
+      { accessory, endpoint: '192.168.2.39:55443' }
+    );
+    check(
+      'persist writes the address into the accessory cache',
+      accessory.context.endpoint === '192.168.2.39:55443' &&
+        updated[0] === accessory,
+      JSON.stringify(accessory.context)
+    );
+
+    const sent = [];
+    const fake = {
+      lastSweep: 0,
+      searchMessage: Buffer.from('x'),
+      port: 1982,
+      log: { debug: () => {} },
+      sock: { send: (...args) => sent.push(args[4]) },
+    };
+    YeePlatform.prototype.sweep.call(fake);
+    const first = fake.lastSweep;
+    YeePlatform.prototype.sweep.call(fake);
+    check(
+      'a second sweep within 30 s does nothing',
+      first > 0 && fake.lastSweep === first && sent.length <= 1,
+      `${sent.length}`
+    );
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }
