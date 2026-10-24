@@ -264,9 +264,15 @@ async function makeBulb(lamp, config = {}, props = {}, opts = {}) {
   const accessory = new FakeAccessory('Lamp');
   accessory.context.did = '0xtest';
   Object.assign(accessory.context, opts.context || {});
-  (opts.switches || []).forEach((subtype) =>
-    accessory.addService(new global.Service.Switch('Lamp', subtype))
-  );
+  (opts.switches || []).forEach((subtype) => {
+    const service = accessory.addService(
+      new global.Service.Switch('Lamp', subtype)
+    );
+    // What HomeKit last held for the switch, as the cache brings it back.
+    if ((opts.switchOn || []).includes(subtype)) {
+      service.getCharacteristic(global.Characteristic.On).updateValue(true);
+    }
+  });
   // Order mirrors platform.js: moonlight outside brightness and temperature so
   // it sees their writes coming, alert outside everything so its setTemperature
   // override sits outermost of all.

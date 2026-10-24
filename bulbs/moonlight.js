@@ -37,8 +37,9 @@ const MoonlightMode = (Device) =>
       // Which property this lamp answers about its night mode with, once the
       // probe knows. Null until then, and for a lamp that has no night mode.
       this.moonlightProp = null;
-      // What the lamp was lit at before the mode was switched on.
-      this.moonlightSnapshot = null;
+      // What the lamp was lit at before the mode was switched on. Set past the
+      // setter: the one saved by the last launch is still needed below.
+      this._moonlightSnapshot = null;
       // Set when the probe could not reach the lamp; the next connection that
       // does get through probes again.
       this.moonlightUnprobed = false;
@@ -50,6 +51,27 @@ const MoonlightMode = (Device) =>
       // switched the mode on, HAP accepted it, and the lamp burned all night.
       // What the probe learns is kept with the accessory, so a lamp known to
       // have the mode is wired at once and asked nothing.
+      //
+      // The mode itself is taken from the switch HomeKit last saw until the
+      // lamp says otherwise. Starting from daylight let Adaptive Lighting's
+      // first temperature after a launch through before the lamp had been
+      // read: at 05:02 on 2026-10-24 the nightly container update restarted
+      // the bridge, set_ct_abx went out within a second, and both lamps the
+      // 23:00 automation had put in night mode were lit white until dawn.
+      const cached = this.accessory.getServiceById(
+        global.Service.Switch,
+        MOONLIGHT
+      );
+      if (
+        cached &&
+        this.power &&
+        cached.getCharacteristic(global.Characteristic.On).value
+      ) {
+        this.activeMode = MOONLIGHT_MODE;
+        this.moonlightSnapshot =
+          this.accessory.context.moonlightSnapshot || null;
+      }
+
       const saved = this.accessory.context.moonlightProp;
       if (saved) {
         this.moonlightProp = saved;
@@ -147,6 +169,22 @@ const MoonlightMode = (Device) =>
         .updateValue(this.nightMode);
     }
 
+    // Saved with the accessory, so leaving a mode entered before a restart
+    // still knows what to go back to rather than leaving the night light's 1%.
+    get moonlightSnapshot() {
+      return this._moonlightSnapshot || null;
+    }
+
+    set moonlightSnapshot(snapshot) {
+      this._moonlightSnapshot = snapshot || null;
+      const { context } = this.accessory || {};
+      if (!context) return;
+      const saved = JSON.stringify(context.moonlightSnapshot || null);
+      if (saved === JSON.stringify(this._moonlightSnapshot)) return;
+      context.moonlightSnapshot = this._moonlightSnapshot;
+      this.platform.persist?.(this);
+    }
+
     // active_mode is the mode itself. nl_br is a brightness, and a night light
     // burning at any brightness at all is the mode being on.
     modeFrom(value) {
@@ -220,7 +258,7 @@ const MoonlightMode = (Device) =>
 
       // Taken before the command goes out: from here on the brightness we know
       // is the night light's, and what to come back to would be lost.
-      this.moonlightSnapshot = {
+      const snapshot = {
         bright: this.bright,
         power: this.power,
         // A lamp lit in a colour goes back to that colour, not to white.
@@ -228,11 +266,6 @@ const MoonlightMode = (Device) =>
         hue: this.hue,
         sat: this.sat,
       };
-      this.log.debug(
-        `${this.tag}: night mode on, snapshot ${JSON.stringify(
-          this.moonlightSnapshot
-        )}.`
-      );
 
       // Claimed before the command goes out, and given back if it never lands.
       this.activeMode = MOONLIGHT_MODE;
@@ -246,10 +279,13 @@ const MoonlightMode = (Device) =>
       // and kept, so the way out still lands on the curve.
       const pending = this.pendingState();
       if (pending.ct !== undefined) this._temperature = pending.ct;
-      if (Number.isFinite(pending.bright)) {
-        this.moonlightSnapshot.bright = pending.bright;
-      }
+      if (Number.isFinite(pending.bright)) snapshot.bright = pending.bright;
       this.discardPending(['ct', 'bright', 'hue', 'sat']);
+
+      this.moonlightSnapshot = snapshot;
+      this.log.debug(
+        `${this.tag}: night mode on, snapshot ${JSON.stringify(snapshot)}.`
+      );
 
       try {
         await this.sendCmd({

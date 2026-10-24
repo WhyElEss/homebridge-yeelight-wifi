@@ -93,10 +93,10 @@ const Temperature = (Device) =>
       );
     }
 
-    // `fromAdaptiveLighting` is unused here - whether the lamp may be woken
-    // depends on AL being armed, not on which write this is - but it is part
-    // of the signature so the alert mixin can intercept background nudges.
-    // eslint-disable-next-line no-unused-vars
+    // Whether the lamp may be woken depends on AL being armed, not on which
+    // write this is. `fromAdaptiveLighting` marks the command as background -
+    // the next nudge supersedes it, so nothing waits on a lamp that is not
+    // answering - and lets the alert and moonlight mixins intercept it.
     setTemperature(mired, fromAdaptiveLighting = false) {
       // If we are already in color temperature mode (2) and the current
       // temperature matches the new temperature there is no need to send
@@ -113,7 +113,10 @@ const Temperature = (Device) =>
           this._temperature = mired;
           return Promise.resolve();
         }
-        return this.applyState({ ct: mired });
+        return this.applyState(
+          { ct: mired },
+          { background: fromAdaptiveLighting }
+        );
       }
 
       // A direct request from the user turns the lamp on and takes it there.

@@ -142,9 +142,9 @@ const Brightness = (Device) =>
       // into the set_scene that woke it. Dragging to the bottom put the lamp
       // back on at 1%, which is how this was found.
       if (!(Number(brightness) > 0)) {
-        // As much an Off as one written to On - see OFF_TAIL in bulb.js.
-        this.offAt = Date.now();
-        return this.applyState({ power: false, force: true });
+        // As much an Off as one written to On - see OFF_TAIL in bulb.js -
+        // and kept the same way if the lamp misses it.
+        return this.setPower(false);
       }
 
       // The lamp drops brightness while it is off, so power is requested in the

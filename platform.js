@@ -29,7 +29,10 @@ const SEARCH_INTERVAL = 15000;
 const SEARCH_ROUNDS = 40;
 // A sweep asks every address on the local network, so it is kept rare: a lamp
 // that has gone missing triggers one at most this often, whichever lamp asks.
-const SWEEP_EVERY = 30000;
+// Two minutes, not thirty seconds: on 2026-10-24 a lamp whose link was failing
+// for three hours kept asking, and every sweep is 254 ARP broadcasts that the
+// lamps on Wi-Fi hear too.
+const SWEEP_EVERY = 120000;
 // One datagram per address, spaced out: each is preceded by an ARP broadcast
 // the lamps on Wi-Fi hear too, and a burst of those is the kind of load their
 // firmware handles worst. 254 addresses take about two seconds.
@@ -233,10 +236,13 @@ class YeePlatform {
   // rounds of it on 2026-10-23 and answered every search sent straight to its
   // own address. So a lamp that has gone quiet is looked for both ways, and
   // its reply moves it like an announcement would.
-  lampLost(bulb) {
+  // Only a lamp that could not be reached at all is swept for. One that takes
+  // the connection and then says nothing is where we think it is - a new
+  // address would not answer on the old one.
+  lampLost(bulb, err) {
     this.log.debug(`${bulb.tag}: not answering, looking for it.`);
     this.search();
-    this.sweep();
+    if (err && err.unreachable) this.sweep();
   }
 
   sweep() {

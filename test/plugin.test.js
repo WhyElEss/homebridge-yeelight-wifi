@@ -2827,10 +2827,178 @@ async function run() {
     const first = fake.lastSweep;
     YeePlatform.prototype.sweep.call(fake);
     check(
-      'a second sweep within 30 s does nothing',
+      'a second sweep within two minutes does nothing',
       first > 0 && fake.lastSweep === first && sent.length <= 1,
       `${sent.length}`
     );
+
+    const asked = { search: 0, sweep: 0 };
+    const lostOn = {
+      log: { debug: () => {} },
+      search: () => (asked.search += 1),
+      sweep: () => (asked.sweep += 1),
+    };
+    const silentErr = new Error('no reply to cmd 1 within 2000ms');
+    const unreachableErr = Object.assign(new Error('EHOSTUNREACH'), {
+      unreachable: true,
+    });
+    YeePlatform.prototype.lampLost.call(lostOn, { tag: 'Lamp' }, silentErr);
+    check(
+      'a lamp that takes the connection and says nothing is not swept for',
+      asked.search === 1 && asked.sweep === 0,
+      JSON.stringify(asked)
+    );
+    YeePlatform.prototype.lampLost.call(
+      lostOn,
+      { tag: 'Lamp' },
+      unreachableErr
+    );
+    check(
+      'a lamp that cannot be reached is',
+      asked.sweep === 1,
+      JSON.stringify(asked)
+    );
+  }
+
+  // ---------------------------------------------------------------- 76
+  console.log('\n76. Night mode survives a restart of the bridge');
+  {
+    const lamp = new FakeLamp({ props: { active_mode: '', nl_br: '1' } });
+    await lamp.listen();
+    const { bulb, service, accessory } = await makeBulb(
+      lamp,
+      {},
+      { power: 'on', bright: '1' },
+      {
+        context: {
+          moonlightProp: 'nl_br',
+          moonlightSnapshot: { bright: 100, power: true, colorMode: 2 },
+        },
+        switches: [MOONLIGHT],
+        switchOn: [MOONLIGHT],
+      }
+    );
+    alActive(bulb);
+    check(
+      'the mode HomeKit last saw is where the lamp starts',
+      bulb.nightMode === true,
+      `${bulb.nightMode}`
+    );
+    // 05:02:38 on 2026-10-24: Adaptive Lighting's first temperature after the
+    // launch, before the lamp has been read.
+    await service.getCharacteristic('ColorTemperature').write(370, AL);
+    await sleep(200);
+    check(
+      'no set_ct_abx ends the mode',
+      !lamp.methods().includes('set_ct_abx'),
+      JSON.stringify(lamp.received)
+    );
+
+    await switchSet(accessory).write(false);
+    await sleep(300);
+    const wire = lamp.received.map((r) => [r.method, r.params]);
+    console.log('     wire:', JSON.stringify(wire));
+    check(
+      'leaving goes back to the brightness saved before the restart',
+      wire.some(
+        ([method, params]) => method === 'set_bright' && params[0] === 100
+      ),
+      JSON.stringify(wire)
+    );
+    check(
+      'and the saved snapshot is cleared',
+      accessory.context.moonlightSnapshot === null,
+      JSON.stringify(accessory.context.moonlightSnapshot)
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 77
+  console.log('\n77. An Off the lamp missed goes again when it answers');
+  {
+    const lamp = new FakeLamp({ props: { power: 'on' } });
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(
+      lamp,
+      { connection: { timeout: 200, retries: 1, recoverWithin: 300 } },
+      { power: 'on' },
+      { context: { moonlightProp: 'nl_br' } }
+    );
+    lampSays(bulb, { power: 'on' });
+    // 07:47:17 on 2026-10-24: the dawn Off reaches a lamp that is not
+    // answering.
+    lamp.silent = true;
+    await service.getCharacteristic('On').write(false);
+    await sleep(900);
+    check(
+      'the Off is kept for later',
+      bulb.missedPower && bulb.missedPower.power === false,
+      JSON.stringify(bulb.missedPower)
+    );
+    lamp.silent = false;
+    lamp.reset();
+    // Anything the lamp answers will do - here the background read.
+    bulb.refreshPowerInBackground();
+    await sleep(400);
+    const wire = lamp.received.map((r) => [r.method, r.params]);
+    console.log('     wire:', JSON.stringify(wire));
+    check(
+      'it goes out again the moment the lamp answers',
+      wire.some(
+        ([method, params]) => method === 'set_power' && params[0] === 'off'
+      ),
+      JSON.stringify(wire)
+    );
+    check('the lamp is off', bulb.power === false, `${bulb.power}`);
+    check('and nothing is left owed', bulb.missedPower === null, '');
+
+    // A newer word from HomeKit replaces a missed one.
+    lamp.silent = true;
+    await service.getCharacteristic('On').write(true);
+    await sleep(900);
+    lamp.silent = false;
+    await service.getCharacteristic('On').write(false);
+    check('a newer write clears it', bulb.missedPower === null, '');
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 78
+  console.log(
+    "\n78. Adaptive Lighting's nudges do not hold the queue for a dead lamp"
+  );
+  {
+    const lamp = new FakeLamp({ silent: true });
+    await lamp.listen();
+    const { bulb, service } = await makeBulb(
+      lamp,
+      { connection: { timeout: 300, retries: 1, recoverWithin: 5000 } },
+      { power: 'on' },
+      { context: { moonlightProp: 'nl_br' } }
+    );
+    alActive(bulb);
+    lampSays(bulb, { power: 'on' });
+    const nudged = Date.now();
+    await service.getCharacteristic('ColorTemperature').write(360, AL);
+    await sleep(100);
+    await service.getCharacteristic('On').write(false);
+    await sleep(450);
+    const offAt = lamp.received.findIndex(
+      (r) => r.method === 'set_power' && r.params[0] === 'off'
+    );
+    check(
+      'the Off is on the wire within one reply timeout of the nudge',
+      offAt !== -1,
+      `${JSON.stringify(lamp.methods())} after ${Date.now() - nudged} ms`
+    );
+    check(
+      'the nudge was sent once, not retried',
+      lamp.methods().filter((m) => m === 'set_ct_abx').length === 1,
+      JSON.stringify(lamp.methods())
+    );
+    bulb.reset();
+    await lamp.close();
   }
 
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);

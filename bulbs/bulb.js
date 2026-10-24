@@ -14,6 +14,10 @@ const OFF_TAIL = 2000;
 // A reply slower than this is worth a line in the log: the lamps answer in
 // 30-240 ms when they are well.
 const SLOW_REPLY = 500;
+// How long an On or Off the lamp missed is kept for the moment it answers
+// again. Long enough for a lamp that drops off Wi-Fi for a stretch, short
+// enough that nobody is surprised by it.
+const MISSED_POWER_FOR = 30 * MINUTE;
 
 class YeeBulb {
   constructor(props, platform) {
@@ -95,6 +99,16 @@ class YeeBulb {
     // first connection that does get through reads it then: until it does, the
     // cache is whatever HomeKit was last told, possibly yesterday.
     this.stateUnread = false;
+    // The last On or Off HomeKit asked for, and the same one again if it never
+    // reached the lamp. An automation writes once and moves on: at 07:47 on
+    // 2026-10-24 the dawn Off reached a lamp with a failing Wi-Fi link, was
+    // given up after its retry, and the lamp burned on while the lamps next to
+    // it went dark.
+    this.powerIntent = null;
+    this.missedPower = null;
+    // Whether everything gathered for the next flush came from the background
+    // - Adaptive Lighting's drift - and may be dropped rather than waited on.
+    this.desiredBackground = false;
 
     // The advertisement we were built from already carries the live state.
     this.power = props.power;
@@ -199,7 +213,7 @@ class YeeBulb {
     if (now - this.lastPowerRead < this.staleAfter) return;
     this.lastPowerRead = now;
     const props = this.backgroundProps();
-    this.getProperty(props)
+    this.getProperty(props, { background: true })
       .then((values) => {
         props.forEach((prop, i) => {
           if (values[i] === undefined || values[i] === '') return;
@@ -257,8 +271,25 @@ class YeeBulb {
   }
 
   // A lamp that does not answer may simply have a new address.
-  lost() {
-    this.platform.lampLost?.(this);
+  lost(err) {
+    this.platform.lampLost?.(this, err);
+  }
+
+  // The lamp has just answered a command, so whatever it missed can go now.
+  onAnswered() {
+    const missed = this.missedPower;
+    if (!missed) return;
+    this.missedPower = null;
+    if (this.powerIntent !== missed) return;
+    if (Date.now() - missed.at > MISSED_POWER_FOR) return;
+    this.log.info(
+      `${this.tag}: answering again - sending the ${
+        missed.power ? 'On' : 'Off'
+      } it missed.`
+    );
+    this.accepted(this.sendPower(missed), () =>
+      this.reflect({ On: this.power })
+    );
   }
 
   // Advertisements carry the whole state, so refreshing from them costs no
@@ -436,6 +467,7 @@ class YeeBulb {
     if ('result' in message) {
       this.log.debug(`${this.tag}: ${JSON.stringify(message)}`);
       cmd.resolve(message.result);
+      this.onAnswered();
     } else if ('error' in message) {
       this.log.error(`${this.tag}: ${JSON.stringify(message.error)}`);
       cmd.reject(new Error(message.error.message || 'command rejected'));
@@ -452,6 +484,9 @@ class YeeBulb {
     const params = Object.keys(message.params).sort(
       (a, b) => (b === 'power') - (a === 'power')
     );
+    // The lamp changed its own power - our command landing, its touch panel,
+    // another controller. Either way it is past whatever it missed.
+    if (params.includes('power')) this.missedPower = null;
     params.forEach((param) => {
       this.updateStateFromProp(param, message.params[param]);
     });
@@ -475,8 +510,13 @@ class YeeBulb {
     return this.enqueue(cmd);
   }
 
-  enqueue(cmd) {
-    const run = () => this.throttle().then(() => this.dispatch(cmd));
+  // `background` marks a command nobody is waiting for. It gets one attempt
+  // and no recovery window: on 2026-10-24, with one lamp's link failing,
+  // Adaptive Lighting's nudges each held the queue for up to 17 s, and the
+  // dawn Off waited 35 s behind them before it was even sent.
+  enqueue(cmd, { background = false } = {}) {
+    const run = () =>
+      this.throttle().then(() => this.dispatch(cmd, { background }));
     // Run on both settlements: a failed command must not stall the queue.
     const result = this.queue.then(run, run);
     this.queue = result.then(
@@ -498,12 +538,13 @@ class YeeBulb {
     return sleep(wait).then(() => this.throttle());
   }
 
-  async dispatch(cmd) {
+  async dispatch(cmd, { background = false } = {}) {
     cmd.id = nextCmdId.next().value;
     const msg = JSON.stringify(cmd);
     const deadline = Date.now() + this.recoverWithin;
+    const retries = background ? 0 : this.retries;
 
-    for (let attempt = 0; attempt <= this.retries; attempt += 1) {
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
       try {
         // Sequential by design: this is a retry ladder, not a fan-out.
         // eslint-disable-next-line no-await-in-loop
@@ -517,9 +558,9 @@ class YeeBulb {
         // Whatever went wrong, the socket is suspect. Re-sending on it is what
         // burned through the quota before, so always start a fresh one.
         this.reset();
-        this.lost();
+        this.lost(err);
 
-        if (attempt === this.retries) {
+        if (attempt === retries) {
           this.log.error(
             `${this.tag}: cmd ${cmd.id} failed after ${
               attempt + 1
@@ -559,7 +600,7 @@ class YeeBulb {
         this.reset();
         // Rate-limited by the platform, so asking on every knock is free. A
         // lamp found at a new address meanwhile is knocked on there next.
-        this.lost();
+        this.lost(err);
         if (Date.now() + 500 >= deadline) return;
         // eslint-disable-next-line no-await-in-loop
         await sleep(500);
@@ -591,8 +632,8 @@ class YeeBulb {
     });
   }
 
-  getProperty(properties) {
-    return this.enqueue({ method: 'get_prop', params: properties });
+  getProperty(properties, opts) {
+    return this.enqueue({ method: 'get_prop', params: properties }, opts);
   }
 
   // One command that replaces everything we think we know. Used when a lamp is
@@ -636,8 +677,12 @@ class YeeBulb {
   // HomeKit writes On, Brightness and ColorTemperature as separate calls in the
   // same instant. Merging them into one flush turns a scene into a single
   // command instead of the burst the lamp answers by hanging up.
-  applyState(patch) {
+  applyState(patch, { background = false } = {}) {
     const desired = this.desired || {};
+    // One write that is not background makes the whole flush worth waiting on.
+    this.desiredBackground = this.desired
+      ? this.desiredBackground && background
+      : background;
     const next = Object.assign({}, patch);
 
     // A mixin asking for power so its colour change lands must not undo an
@@ -700,7 +745,9 @@ class YeeBulb {
     if (this.inflight) return;
 
     const { desired, settle } = this;
+    const background = this.desiredBackground;
     this.desired = null;
+    this.desiredBackground = false;
     this.pending = null;
     this.settle = null;
 
@@ -723,7 +770,7 @@ class YeeBulb {
       // arrive in the same read as the reply that resolves the command, and
       // is handled before the commit's microtask ever runs.
       if (echo) this.noteCommanded(echo);
-      return this.enqueue(cmd).then(commit);
+      return this.enqueue(cmd, { background }).then(commit);
     });
     runs.forEach((run) => run.catch(() => {}));
     const inflight = Promise.all(runs);
@@ -1064,9 +1111,29 @@ class YeeBulb {
     // A later write that would wake the lamp is weighed against this - see
     // OFF_TAIL. An explicit On ends that at once.
     this.offAt = power ? 0 : Date.now();
-    // `force` keeps an explicit HomeKit write authoritative even when our
-    // cached state disagrees with the lamp.
-    return this.applyState({ power: !!power, force: true });
+    // The newest word from HomeKit replaces anything an earlier one missed.
+    const intent = { power: !!power, at: Date.now() };
+    this.powerIntent = intent;
+    this.missedPower = null;
+    return this.sendPower(intent);
+  }
+
+  // `force` keeps an explicit HomeKit write authoritative even when our
+  // cached state disagrees with the lamp. If it never lands it is kept, and
+  // goes out again the next time the lamp answers anything - see onAnswered.
+  sendPower(intent) {
+    const result = this.applyState({ power: intent.power, force: true });
+    result.catch(() => {
+      if (this.powerIntent !== intent) return;
+      if (Date.now() - intent.at > MISSED_POWER_FOR) return;
+      this.missedPower = intent;
+      this.log.warn(
+        `${this.tag}: ${
+          intent.power ? 'On' : 'Off'
+        } did not reach the lamp - it goes again once the lamp answers.`
+      );
+    });
+    return result;
   }
 }
 
