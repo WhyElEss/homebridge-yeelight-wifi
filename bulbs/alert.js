@@ -60,12 +60,14 @@ const Alert = (Device) =>
       const now = Date.now();
       if (this.preBatch && now - this.preBatch.last <= BATCH_WINDOW) {
         this.preBatch.last = now;
+        this.preBatch.writes += 1;
         return;
       }
       this.preBatch = {
         snapshot: this.captureAlertSnapshot(),
         first: now,
         last: now,
+        writes: 1,
       };
     }
 
@@ -75,11 +77,17 @@ const Alert = (Device) =>
       const batch = this.preBatch;
       this.preBatch = null;
       if (batch && Date.now() - batch.last <= BATCH_WINDOW) {
-        this.log.info(
-          `${this.tag}: alert came with ${
-            Date.now() - batch.first
-          } ms of other HomeKit writes - restoring what was before them.`
-        );
+        // The alert switch's own write is one of them; said only when there
+        // was something else in the batch.
+        if (batch.writes > 1) {
+          this.log.info(
+            `${this.tag}: alert came with ${
+              batch.writes - 1
+            } other HomeKit change(s) in the ${
+              Date.now() - batch.first
+            } ms before it - restoring what was before them.`
+          );
+        }
         return batch.snapshot;
       }
       return this.captureAlertSnapshot();
