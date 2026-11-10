@@ -3001,6 +3001,170 @@ async function run() {
     await lamp.close();
   }
 
+  // A stand-in for HAP-NodeJS's AdaptiveLightingController with the members
+  // the alert relies on, wrapped the way configureAdaptiveLightingController
+  // wraps the real one. The real one is exercised separately against the
+  // installed HAP-NodeJS (test/real-hap-al.mjs).
+  const TRANSITION = { transitionId: 'curve-1', transitionCurve: [1, 2, 3] };
+  const fakeAL = (bulb) => {
+    const controller = {
+      activeTransition: JSON.parse(JSON.stringify(TRANSITION)),
+      resumed: [],
+      isAdaptiveLightingActive() {
+        return !!this.activeTransition;
+      },
+      serialize() {
+        return this.activeTransition
+          ? { activeTransition: this.activeTransition }
+          : undefined;
+      },
+      disableAdaptiveLighting() {
+        this.activeTransition = undefined;
+      },
+      handleActiveTransitionUpdated() {
+        this.resumed.push(JSON.parse(JSON.stringify(this.activeTransition)));
+      },
+    };
+    bulb.controller = controller;
+    bulb.watchAdaptiveLightingDisable();
+    return controller;
+  };
+  // What the hub's Transition Control write with only an iid ends up doing.
+  const hubTurnsALOff = (controller) => controller.disableAdaptiveLighting();
+  const alertLamp = async (props = {}) => {
+    const lamp = new FakeLamp();
+    await lamp.listen();
+    const made = await makeBulb(
+      lamp,
+      {},
+      {
+        power: 'on',
+        alert: { enabled: true, hue: 0, saturation: 100, brightness: 100 },
+        ...props,
+      }
+    );
+    configureAlert(fakePlatform(), made.bulb, 'Lamp');
+    lampSays(made.bulb, { power: props.power || 'on', color_mode: '2' });
+    return { lamp, ...made };
+  };
+
+  // ---------------------------------------------------------------- 79
+  console.log(
+    "\n79. AL switched off in the alert's own batch comes back with the restore"
+  );
+  {
+    const { lamp, bulb, accessory } = await alertLamp();
+    const controller = fakeAL(bulb);
+    // 2026-11-09 21:57:45: one request, Entrance's AL-off first, Alert=1 next.
+    hubTurnsALOff(controller);
+    await alertSwitch(accessory).getCharacteristic('On').write(true);
+    await sleep(200);
+    check(
+      'the alert went off with AL already gone',
+      bulb.alertActive && !controller.isAdaptiveLightingActive(),
+      `${bulb.alertActive} ${controller.isAdaptiveLightingActive()}`
+    );
+    await alertSwitch(accessory).getCharacteristic('On').write(false);
+    await sleep(300);
+    check(
+      'Adaptive Lighting is on again after the restore',
+      controller.isAdaptiveLightingActive(),
+      'still off'
+    );
+    check(
+      'with the very schedule the hub had sent',
+      controller.resumed.length === 1 &&
+        JSON.stringify(controller.resumed[0]) === JSON.stringify(TRANSITION),
+      JSON.stringify(controller.resumed)
+    );
+    check(
+      'and the lamp left the alert colour',
+      lamp.received.some(
+        (r) => r.method === 'set_scene' && r.params[0] === 'ct'
+      ),
+      JSON.stringify(lamp.received.map((r) => [r.method, r.params]))
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 80
+  console.log(
+    '\n80. Any write in the batch before the alert is undone by the restore'
+  );
+  {
+    const { lamp, bulb, service, accessory } = await alertLamp({
+      power: 'off',
+      bright: '40',
+    });
+    // The automation also switches the lamp on at 100% a few ms before the
+    // alert; the lamp was off at 40% before the door opened.
+    await scene(service, { On: true, Brightness: 100 });
+    await alertSwitch(accessory).getCharacteristic('On').write(true);
+    await sleep(250);
+    lamp.reset();
+    await alertSwitch(accessory).getCharacteristic('On').write(false);
+    await sleep(500);
+    check(
+      'the lamp is off again, as before the batch',
+      lamp.received.some(
+        (r) => r.method === 'set_power' && r.params[0] === 'off'
+      ),
+      JSON.stringify(lamp.received.map((r) => [r.method, r.params]))
+    );
+    check(
+      'at the brightness it had before the batch',
+      lamp.received.some(
+        (r) =>
+          (r.method === 'set_scene' && r.params[r.params.length - 1] === 40) ||
+          (r.method === 'set_bright' && r.params[0] === 40)
+      ),
+      JSON.stringify(lamp.received.map((r) => [r.method, r.params]))
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 81
+  console.log('\n81. An AL-off well before the alert is not undone');
+  {
+    const { lamp, bulb, accessory } = await alertLamp();
+    const controller = fakeAL(bulb);
+    // A scene that ended AL 27 s before the door (21:57:18 vs 21:57:45);
+    // shortened here to well past the batch window.
+    hubTurnsALOff(controller);
+    await sleep(700);
+    await alertSwitch(accessory).getCharacteristic('On').write(true);
+    await sleep(200);
+    await alertSwitch(accessory).getCharacteristic('On').write(false);
+    await sleep(300);
+    check(
+      'AL stays off - it was off when the door opened',
+      !controller.isAdaptiveLightingActive() && controller.resumed.length === 0,
+      `${controller.isAdaptiveLightingActive()} ${controller.resumed.length}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
+  // ---------------------------------------------------------------- 82
+  console.log('\n82. AL that survives the alert is left alone');
+  {
+    const { lamp, bulb, accessory } = await alertLamp();
+    const controller = fakeAL(bulb);
+    await alertSwitch(accessory).getCharacteristic('On').write(true);
+    await sleep(200);
+    await alertSwitch(accessory).getCharacteristic('On').write(false);
+    await sleep(300);
+    check(
+      'still on, and not re-armed over itself',
+      controller.isAdaptiveLightingActive() && controller.resumed.length === 0,
+      `${controller.isAdaptiveLightingActive()} ${controller.resumed.length}`
+    );
+    bulb.reset();
+    await lamp.close();
+  }
+
   console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);
 }

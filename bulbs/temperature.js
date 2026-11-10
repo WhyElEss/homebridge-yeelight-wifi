@@ -93,6 +93,50 @@ const Temperature = (Device) =>
       );
     }
 
+    // A copy of the running transition - the schedule the hub sent - or null.
+    // `serialize` is what HAP-NodeJS itself writes to ControllerStorage.
+    adaptiveTransition() {
+      if (!this.adaptiveLighting) return null;
+      if (typeof this.controller.serialize !== 'function') return null;
+      const saved = this.controller.serialize();
+      return saved ? JSON.parse(JSON.stringify(saved)) : null;
+    }
+
+    // Puts a transition taken by adaptiveTransition() back, exactly as
+    // HAP-NodeJS does when the hub sends one: handleActiveTransitionUpdated
+    // tells HomeKit the active transition count is 1 again, starts the
+    // minute-by-minute updates (the first one at once, at the curve's current
+    // point) and saves it to ControllerStorage so it survives a restart. Both
+    // members are internal to HAP-NodeJS (TypeScript-private), which is why
+    // they are checked before use; tested against HAP-NodeJS 2.x.
+    resumeAdaptiveLighting(saved) {
+      if (!saved || !saved.activeTransition) return false;
+      if (this.adaptiveLighting) return false;
+      const controller = this.controller;
+      if (typeof controller.handleActiveTransitionUpdated !== 'function') {
+        this.log.warn(
+          `${this.tag}: cannot put Adaptive Lighting back on this Homebridge.`
+        );
+        return false;
+      }
+      try {
+        controller.activeTransition = JSON.parse(
+          JSON.stringify(saved.activeTransition)
+        );
+        controller.handleActiveTransitionUpdated();
+      } catch (err) {
+        this.log.warn(
+          `${this.tag}: could not put Adaptive Lighting back: ${err.message}`
+        );
+        if (typeof controller.disableAdaptiveLighting === 'function') {
+          controller.disableAdaptiveLighting();
+        }
+        return false;
+      }
+      this.log.info(`${this.tag}: Adaptive Lighting back on after the alert.`);
+      return this.adaptiveLighting;
+    }
+
     // Whether the lamp may be woken depends on AL being armed, not on which
     // write this is. `fromAdaptiveLighting` marks the command as background -
     // the next nudge supersedes it, so nothing waits on a lamp that is not
@@ -157,12 +201,32 @@ const Temperature = (Device) =>
         this.service
       );
       this.accessory.configureController(this.controller);
+      this.watchAdaptiveLightingDisable();
       // Waking a lamp at the transition's current temperature is handled by
       // applyPowerOnDefaults, in the same command that switches it on. This
       // used to be a second command sent from here, with the temperature
       // decremented by one mired each time to get past setTemperature's
       // "same value, skip" check - a lamp that was switched on often drifted
       // measurably away from the curve.
+    }
+
+    watchAdaptiveLightingDisable() {
+      // The hub switches Adaptive Lighting off with a Transition Control write
+      // that carries nothing but the colour temperature's iid, and it puts that
+      // write into the same request as the alert switch: on 2026-11-09 at
+      // 21:57:45 the door automation sent Entrance its AL-off a few
+      // milliseconds before its Alert=1. HAP-NodeJS drops the schedule on the
+      // spot (handleAdaptiveLightingDisabled -> disableAdaptiveLighting), so
+      // by the time the alert takes its snapshot the transition is gone. Every
+      // way HAP-NodeJS ends a transition goes through this one method, so this
+      // is where the state before the batch is kept, transition included.
+      const disable = this.controller.disableAdaptiveLighting;
+      if (typeof disable === 'function') {
+        this.controller.disableAdaptiveLighting = (...args) => {
+          if (this.adaptiveLighting) this.rememberPreBatchState();
+          return disable.apply(this.controller, args);
+        };
+      }
     }
   };
 

@@ -254,11 +254,14 @@ This applies only when nothing else arrives in the same coalescing window. A sce
 A lamp configured with `alert.enabled` gains a switch named after it — `Entrance Night Light Alert`, on the lamp's own accessory — for automations like _"turn the lamp red while the front door is open, then put it back to whatever it was doing"_.
 
 - Switching it **on** snapshots the lamp's power, colour, colour temperature and brightness, then takes it to the alert colour. A lamp that was off is lit by a single `set_scene`.
-- Switching it **off** puts the snapshot back: the colour or the colour temperature it was on, and off again if that is how it started. The colour is restored before the power, so a lamp that was off does not come back red the next time anything switches it on.
+- Switching it **off** puts the snapshot back: the colour or the colour temperature it was on, Adaptive Lighting if it was on, night mode if it was on, and off again if that is how it started. The colour is restored before the power, so a lamp that was off does not come back red the next time anything switches it on.
+- The snapshot is of the lamp **before the batch the alert arrived in**. A home hub sends an automation as one burst of writes, and whatever else the door automation carries for this lamp — a power or brightness change, or, as the Home app does, switching its Adaptive Lighting off a few milliseconds before the alert switch goes on — lands just ahead of the alert. Writes less than 100 ms apart count as one batch; everything in the batch is undone by the restore.
 
 Two ordinary single-action automations in the Home app drive it — _door opens_ → switch on, _door closes_ → switch off. Neither has anything to sequence or wait on, so any home hub can run them, with no phone present and no Shortcuts involved.
 
 **On Adaptive Lighting.** This is the reason the alert lives inside the plugin rather than in some separate service that would drive the lamp over HomeKit. HAP-NodeJS switches an active Adaptive Lighting transition off on any characteristic change whose reason is a write — so an outside process setting Hue or Saturation would silently end Adaptive Lighting for that lamp, and only the Home app can arm it again. Everything here goes to the lamp over its own LAN protocol and is reported back to HomeKit with `updateValue`, which is not a write. The transition stays armed across the whole flash-and-restore cycle; there is a test that asserts no characteristic is ever written.
+
+The hub itself is another matter. Captured on 2026-11-09 with HAP-NodeJS's debug log: the door automation sends a lamp's alert switch and, in the same request and just before it, a `CharacteristicValueTransitionControl` write carrying nothing but the colour temperature's iid — HomeKit's "Adaptive Lighting off". Two lamps lost Adaptive Lighting on every door alert this way. The plugin now keeps the hub's schedule with the snapshot and, on restore, puts it back the way HAP-NodeJS installs one the hub sends: the active-transition count goes back to 1 for HomeKit, the minute-by-minute updates resume at the curve's current point, and the schedule is saved so it survives a restart. That uses members HAP-NodeJS does not publish (`serialize`, `activeTransition`, `handleActiveTransitionUpdated`); `test/real-hap-al.mjs` checks them against the installed HAP-NodeJS, with the hub's own captured values.
 
 While a lamp is flashing, Adaptive Lighting's background nudges are held back, so the alert colour is not washed out within the minute — but their values are still recorded, so the restore puts the lamp on the curve where it stands at that moment rather than where it was when the alert began.
 
@@ -346,7 +349,15 @@ Runs the real bulb classes against a fake HAP and a fake lamp, asserting on what
 
 Night mode has a group of its own: that a lamp is found to have it through `nl_br` alone, that switching it on is one `set_power` carrying mode 5, that an Adaptive Lighting nudge never reaches a lamp in the mode while a deliberate write does and ends it, that a `nl_br` of 0 arriving from the lamp takes the switch down, and that switching the mode off restores the brightness the lamp was lit at.
 
-The alert has its own group: that flashing a lit lamp is a single `set_hsv`, that the restore reproduces the snapshot exactly and sends the power off in its own flush after the colour, that an Adaptive Lighting nudge arriving mid-alert never reaches the lamp but is still remembered for the restore, and that no characteristic is ever written — the one thing that would take Adaptive Lighting down.
+The alert has its own group: that flashing a lit lamp is a single `set_hsv`, that the restore reproduces the snapshot exactly and sends the power off in its own flush after the colour, that an Adaptive Lighting nudge arriving mid-alert never reaches the lamp but is still remembered for the restore, and that no characteristic is ever written — the one thing that would take Adaptive Lighting down. Also that Adaptive Lighting switched off in the alert's own batch comes back with the very schedule the hub sent, that any other write in that batch is undone, and that an Adaptive Lighting switched off well before the door opened stays off.
+
+The Adaptive Lighting restore leans on HAP-NodeJS internals, so it has a second test that runs against the real library rather than the fake, wherever HAP-NodeJS is installed (inside the Homebridge container, for instance):
+
+```bash
+node test/real-hap-al.mjs /homebridge/node_modules/homebridge/node_modules/@homebridge/hap-nodejs/dist/index.js
+```
+
+It arms Adaptive Lighting with a schedule the hub sent, switches it off with the hub's own write, puts it back, and checks that HomeKit is told, that the schedule is saved, and that the curve's updates resume.
 
 The lamp's fake can be told to announce its changes the way real firmware does, which is what the slider tests need: that a finger dragging brightness from 5 to 100 is never pushed backwards, that a change the plugin did not make still reaches HomeKit, and that a colour temperature remembered across a restart comes back as the same mired it went in as.
 

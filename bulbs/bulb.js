@@ -179,6 +179,9 @@ class YeeBulb {
   // Homebridge stamps its log to the second, and the order and spacing of
   // writes within a second is exactly what a gesture is made of.
   heard(characteristic, value) {
+    // Before the write takes effect: the alert mixin keeps what the lamp was
+    // before a batch of HomeKit writes, in case an alert closes that batch.
+    this.rememberPreBatchState();
     const now = Date.now();
     const gap = this.lastHeard ? now - this.lastHeard : 0;
     this.lastHeard = now;
@@ -186,6 +189,9 @@ class YeeBulb {
       `${this.tag}: HomeKit set ${characteristic}=${value} (+${gap} ms).`
     );
   }
+
+  // Overridden by the alert mixin; a lamp without an alert has nothing to keep.
+  rememberPreBatchState() {}
 
   // HomeKit is told a write was accepted as soon as it is queued, rather than
   // when the lamp confirms it. Homebridge's own guidance is to "return the

@@ -106,6 +106,10 @@ function configureAlert(platform, bulb, name) {
     .on('set', (value, callback) => {
       // Same rule as the lamp's own handlers: accept now, act after. An alert
       // is two flushes on a lamp that was off, which HomeKit should not wait on.
+      // Logged like every other write - it was the one missing from the log
+      // when the door automation's own AL-off had to be found - and, being
+      // heard, it closes the batch the alert restores from.
+      bulb.heard('Alert', value);
       bulb.accepted(bulb.setAlert(!!value), () => bulb.publishAlertState());
       callback(null);
     })
